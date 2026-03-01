@@ -1,0 +1,17 @@
+# Rust
+target/
+**/target/
+
+# Debug files
+*.pdb
+
+# Build outputs
+dist/
+build/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
