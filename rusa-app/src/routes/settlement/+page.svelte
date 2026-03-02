@@ -39,16 +39,6 @@
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, supplyReqs, anomalies] = await Promise.all([
-        settlementApi.getTasks(s.token),
-        settlementApi.getTasks(s.token), // reusing, in real app would be separate
-        settlementApi.getTasks(s.token),
-      ]);
-      [tasks, supplyReqs, anomalies] = await Promise.all([
-        settlementApi.getTasks(s.token),
-        (async () => { try { return await settlementApi.submitSupplyRequest ? [] : []; } catch { return []; } })(),
-        (async () => { try { return []; } catch { return []; } })(),
-      ]);
       tasks = await settlementApi.getTasks(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
