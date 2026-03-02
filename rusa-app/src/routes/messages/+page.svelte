@@ -1,0 +1,212 @@
+<script lang="ts">
+  import PageShell from '$lib/components/PageShell.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import { session } from '$lib/stores/auth';
+  import { messageApi, userApi } from '$lib/api';
+  import { showToast } from '$lib/stores/toast';
+  import { onMount, onDestroy } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
+
+  let activeTab = $state<'inbox' | 'sent'>('inbox');
+  let inbox: any[] = $state([]);
+  let sent: any[] = $state([]);
+  let selectedMessage: any = $state(null);
+  let composeOpen = $state(false);
+  let loading = $state(false);
+
+  let toInput = $state('');
+  let ccInput = $state('');
+  let bccInput = $state('');
+  let subject = $state('');
+  let body = $state('');
+
+  let unlisten: (() => void) | null = null;
+
+  onMount(async () => {
+    const s = $session;
+    if (!s) return;
+    await loadMessages();
+    try {
+      unlisten = await listen('new_message', () => {
+        loadMessages();
+        showToast('New message received!', 'info');
+      });
+    } catch {}
+  });
+
+  onDestroy(() => { unlisten?.(); });
+
+  async function loadMessages() {
+    const s = $session;
+    if (!s) return;
+    loading = true;
+    try {
+      [inbox, sent] = await Promise.all([
+        messageApi.getInbox(s.token),
+        messageApi.getSent(s.token)
+      ]);
+    } catch (e: any) {
+      showToast('Failed to load messages: ' + e, 'error');
+    }
+    loading = false;
+  }
+
+  async function openMessage(msg: any) {
+    const s = $session;
+    if (!s) return;
+    try {
+      selectedMessage = await messageApi.getMessage(s.token, msg.id);
+      await messageApi.markRead(s.token, msg.id);
+      await loadMessages();
+    } catch {}
+  }
+
+  async function sendMessage() {
+    const s = $session;
+    if (!s) return;
+    if (!subject || !body) { showToast('Subject and body required', 'error'); return; }
+    const parseIds = (input: string) => input.split(',').map(x => x.trim()).filter(Boolean);
+    try {
+      await messageApi.send(s.token, parseIds(toInput), parseIds(ccInput), parseIds(bccInput), subject, body);
+      showToast('Message sent!', 'success');
+      composeOpen = false; subject = ''; body = ''; toInput = ''; ccInput = ''; bccInput = '';
+      await loadMessages();
+    } catch (e: any) {
+      showToast('Failed to send: ' + e, 'error');
+    }
+  }
+
+  async function recallMessage(msg: any) {
+    const s = $session;
+    if (!s) return;
+    try {
+      await messageApi.recall(s.token, msg.id);
+      showToast('Message recalled', 'success');
+      selectedMessage = null;
+      await loadMessages();
+    } catch (e: any) {
+      showToast('Failed to recall: ' + e, 'error');
+    }
+  }
+
+  let currentList = $derived(activeTab === 'inbox' ? inbox : sent);
+  let unread = $derived(inbox.filter(m => !m.read_at).length);
+</script>
+
+<svelte:head><title>RUSA IMS — Messages</title></svelte:head>
+
+<PageShell title="Internal Messages" subtitle="Secure internal communications system">
+  <div class="messages-layout">
+    <div class="messages-sidebar">
+      <div class="messages-tabs">
+        <button class="tab" class:active={activeTab==='inbox'} onclick={() => activeTab='inbox'}>
+          Inbox {#if unread > 0}<span class="badge">{unread}</span>{/if}
+        </button>
+        <button class="tab" class:active={activeTab==='sent'} onclick={() => activeTab='sent'}>Sent</button>
+      </div>
+      <button class="compose-btn" onclick={() => composeOpen = true}>+ Compose</button>
+      <div class="message-list">
+        {#if loading}
+          <p class="list-empty">Loading...</p>
+        {:else if currentList.length === 0}
+          <p class="list-empty">No messages</p>
+        {:else}
+          {#each currentList as msg}
+            <button class="msg-item" class:unread={!msg.read_at && activeTab==='inbox'} class:selected={selectedMessage?.id===msg.id} onclick={() => openMessage(msg)}>
+              <div class="msg-item-from">{msg.from_name || msg.from_username || 'Unknown'}</div>
+              <div class="msg-item-subject">{msg.subject}</div>
+              <div class="msg-item-date">{msg.sent_at ? new Date(msg.sent_at).toLocaleDateString() : '—'}</div>
+            </button>
+          {/each}
+        {/if}
+      </div>
+    </div>
+
+    <div class="message-view">
+      {#if selectedMessage}
+        <div class="msg-header">
+          <h2 class="msg-subject-title">{selectedMessage.subject}</h2>
+          <div class="msg-meta">
+            <span>From: <strong>{selectedMessage.from_name || selectedMessage.from_username}</strong></span>
+            <span>Sent: {selectedMessage.sent_at ? new Date(selectedMessage.sent_at).toLocaleString() : '—'}</span>
+          </div>
+          {#if selectedMessage.recalled_at}
+            <div class="recalled-banner">⚠ This message has been recalled</div>
+          {/if}
+          {#if activeTab === 'sent' && !selectedMessage.recalled_at}
+            <button class="recall-btn" onclick={() => recallMessage(selectedMessage)}>Recall Message</button>
+          {/if}
+        </div>
+        <div class="msg-body">{selectedMessage.body}</div>
+      {:else}
+        <div class="msg-empty">Select a message to read</div>
+      {/if}
+    </div>
+  </div>
+</PageShell>
+
+<Modal bind:open={composeOpen} title="New Message">
+  <div class="compose-form">
+    <div class="field">
+      <label class="field-label" for="compose-to">To (User IDs, comma-separated)</label>
+      <input id="compose-to" class="field-input" bind:value={toInput} placeholder="user-id-1, user-id-2" />
+    </div>
+    <div class="field">
+      <label class="field-label" for="compose-cc">CC (optional)</label>
+      <input id="compose-cc" class="field-input" bind:value={ccInput} placeholder="cc-user-id" />
+    </div>
+    <div class="field">
+      <label class="field-label" for="compose-bcc">BCC (optional)</label>
+      <input id="compose-bcc" class="field-input" bind:value={bccInput} placeholder="bcc-user-id" />
+    </div>
+    <div class="field">
+      <label class="field-label" for="compose-subject">Subject *</label>
+      <input id="compose-subject" class="field-input" bind:value={subject} placeholder="Message subject" />
+    </div>
+    <div class="field">
+      <label class="field-label" for="compose-body">Body *</label>
+      <textarea id="compose-body" class="field-input" bind:value={body} rows={6} placeholder="Write your message..."></textarea>
+    </div>
+    <div class="compose-actions">
+      <button class="btn-secondary" onclick={() => composeOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={sendMessage}>Send Message</button>
+    </div>
+  </div>
+</Modal>
+
+<style>
+  .messages-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; height: calc(100vh - 180px); border: 1px solid #1e2d4a; border-radius: 8px; overflow: hidden; }
+  .messages-sidebar { background: #0d1528; border-right: 1px solid #1e2d4a; display: flex; flex-direction: column; }
+  .messages-tabs { display: flex; border-bottom: 1px solid #1e2d4a; }
+  .tab { flex: 1; background: none; border: none; color: #8fa3cc; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; font-family: 'Space Mono', monospace; font-size: 0.7rem; padding: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; transition: all 0.15s; }
+  .tab.active { color: #00d4ff; border-bottom: 2px solid #00d4ff; }
+  .badge { background: #ffaa00; color: #05070f; font-size: 0.65rem; border-radius: 10px; padding: 1px 6px; font-weight: 700; }
+  .compose-btn { margin: 0.75rem; padding: 0.5rem; background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; }
+  .message-list { flex: 1; overflow-y: auto; }
+  .list-empty { padding: 1.5rem; text-align: center; color: #4a5d82; font-size: 0.85rem; }
+  .msg-item { width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; cursor: pointer; padding: 0.875rem 1rem; text-align: left; transition: background 0.15s; }
+  .msg-item:hover { background: rgba(61,127,255,0.06); }
+  .msg-item.selected { background: rgba(0,212,255,0.08); }
+  .msg-item.unread .msg-item-from { color: #00d4ff; font-weight: 600; }
+  .msg-item.unread .msg-item-subject { color: #e8eeff; font-weight: 500; }
+  .msg-item-from { font-size: 0.8rem; color: #8fa3cc; margin-bottom: 0.15rem; }
+  .msg-item-subject { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-item-date { font-size: 0.7rem; color: #4a5d82; }
+  .message-view { background: #080d1a; padding: 2rem; overflow-y: auto; }
+  .msg-empty { color: #4a5d82; text-align: center; margin-top: 4rem; }
+  .msg-header { border-bottom: 1px solid #1e2d4a; padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+  .msg-subject-title { font-family: 'Space Mono', monospace; font-size: 1rem; color: #e8eeff; margin-bottom: 0.75rem; }
+  .msg-meta { display: flex; gap: 2rem; font-size: 0.82rem; color: #8fa3cc; }
+  .recalled-banner { background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3); border-radius: 4px; color: #ffaa00; font-size: 0.8rem; margin-top: 0.75rem; padding: 0.5rem 0.75rem; }
+  .recall-btn { margin-top: 0.75rem; background: none; border: 1px solid #ff4466; border-radius: 4px; color: #ff4466; cursor: pointer; font-size: 0.8rem; padding: 0.375rem 0.75rem; }
+  .msg-body { color: #e8eeff; font-size: 0.9rem; line-height: 1.7; white-space: pre-wrap; }
+  .compose-form { display: flex; flex-direction: column; gap: 1rem; }
+  .compose-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .field-input { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.625rem 0.875rem; width: 100%; }
+  .field-input:focus { outline: none; border-color: #3d7fff; }
+  textarea.field-input { resize: vertical; min-height: 120px; }
+  .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+</style>
