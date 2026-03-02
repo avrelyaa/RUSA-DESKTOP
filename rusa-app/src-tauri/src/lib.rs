@@ -1,3 +1,9 @@
+pub mod db;
+pub mod models;
+pub mod queries;
+pub mod auth;
+pub mod commands;
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
