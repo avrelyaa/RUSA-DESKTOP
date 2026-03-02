@@ -1,0 +1,69 @@
+use crate::db;
+use crate::models::user::SessionData;
+use redis::AsyncCommands;
+
+pub async fn validate_session_command(token: &str) -> Result<SessionData, String> {
+    let cache_key = format!("session:{}", token);
+
+    // Try Redis cache first
+    if let Ok(mut conn) = db::get_redis().get_multiplexed_async_connection().await {
+        let cached: Result<Option<String>, _> = conn.get(&cache_key).await;
+        if let Ok(Some(json)) = cached {
+            if let Ok(session) = serde_json::from_str::<SessionData>(&json) {
+                return Ok(session);
+            }
+        }
+    }
+
+    // Fall back to DB
+    let user_with_role = crate::queries::auth::validate_session(token)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Invalid or expired session".to_string())?;
+
+    let session = SessionData {
+        user_id: user_with_role.id,
+        username: user_with_role.username.clone(),
+        full_name: user_with_role.full_name.clone(),
+        role_name: user_with_role.role_name.clone(),
+        role_display_name: user_with_role.role_display_name.clone(),
+        tier: user_with_role.tier,
+        subsystem: user_with_role.subsystem.clone(),
+        token: token.to_string(),
+    };
+
+    // Cache in Redis
+    if let Ok(mut conn) = db::get_redis().get_multiplexed_async_connection().await {
+        if let Ok(json) = serde_json::to_string(&session) {
+            let _ = conn.set_ex::<_, _, ()>(&cache_key, json, 86400u64).await;
+        }
+    }
+
+    Ok(session)
+}
+
+pub fn require_role(session: &SessionData, min_tier: i32) -> Result<(), String> {
+    if session.tier >= min_tier {
+        Ok(())
+    } else {
+        Err(format!(
+            "Insufficient permissions. Required tier {}, your tier is {}.",
+            min_tier, session.tier
+        ))
+    }
+}
+
+pub fn require_role_name(session: &SessionData, role_name: &str) -> Result<(), String> {
+    if session.role_name == role_name {
+        Ok(())
+    } else {
+        Err(format!("This action requires the '{}' role.", role_name))
+    }
+}
+
+pub async fn invalidate_session_cache(token: &str) {
+    let cache_key = format!("session:{}", token);
+    if let Ok(mut conn) = db::get_redis().get_multiplexed_async_connection().await {
+        let _: Result<(), _> = conn.del(&cache_key).await;
+    }
+}
