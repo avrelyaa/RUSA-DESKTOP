@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS math_tasks (
 -- ============= SS-04: Data Services =============
 CREATE TABLE IF NOT EXISTS data_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    requester_id UUID NOT NULL REFERENCES users(id),
+    requested_by UUID NOT NULL REFERENCES users(id),
     title VARCHAR(300) NOT NULL,
     description TEXT NOT NULL,
     data_type VARCHAR(200),
@@ -255,6 +255,7 @@ CREATE TABLE IF NOT EXISTS ships (
     name VARCHAR(300) NOT NULL,
     model VARCHAR(200),
     capacity INTEGER,
+    ship_type VARCHAR(100),
     status VARCHAR(50) DEFAULT 'available' CHECK (status IN ('available', 'in_mission', 'maintenance', 'decommissioned')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -280,7 +281,7 @@ CREATE TABLE IF NOT EXISTS missions (
 CREATE TABLE IF NOT EXISTS mission_crew (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     mission_id UUID NOT NULL REFERENCES missions(id),
-    astronaut_id UUID NOT NULL REFERENCES users(id),
+    user_id UUID NOT NULL REFERENCES users(id),
     role VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -425,10 +426,11 @@ CREATE TABLE IF NOT EXISTS farm_progress_reports (
 );
 
 -- ============= SS-09: Space Station Management =============
-CREATE TABLE IF NOT EXISTS space_stations (
+CREATE TABLE IF NOT EXISTS stations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(300) NOT NULL,
     location VARCHAR(300),
+    station_type VARCHAR(100),
     status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'maintenance', 'abandoned')),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -436,7 +438,7 @@ CREATE TABLE IF NOT EXISTS space_stations (
 
 CREATE TABLE IF NOT EXISTS station_inventory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     category VARCHAR(100) NOT NULL CHECK (category IN ('food', 'clothing', 'bedsheets', 'equipment', 'medical', 'other')),
     item_name VARCHAR(300) NOT NULL,
     quantity INTEGER DEFAULT 0,
@@ -449,7 +451,7 @@ CREATE TABLE IF NOT EXISTS station_inventory (
 
 CREATE TABLE IF NOT EXISTS station_map_annotations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     section_name VARCHAR(200) NOT NULL,
     description TEXT,
     x_position DECIMAL(8,2),
@@ -462,7 +464,7 @@ CREATE TABLE IF NOT EXISTS station_map_annotations (
 
 CREATE TABLE IF NOT EXISTS station_personnel_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     user_id UUID NOT NULL REFERENCES users(id),
     event_type VARCHAR(20) CHECK (event_type IN ('boarding', 'departing')),
     event_date TIMESTAMPTZ DEFAULT NOW(),
@@ -473,7 +475,7 @@ CREATE TABLE IF NOT EXISTS station_personnel_log (
 
 CREATE TABLE IF NOT EXISTS station_findings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     reported_by UUID NOT NULL REFERENCES users(id),
     title VARCHAR(300) NOT NULL,
     description TEXT,
@@ -485,7 +487,7 @@ CREATE TABLE IF NOT EXISTS station_findings (
 
 CREATE TABLE IF NOT EXISTS station_supply_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     requested_by UUID NOT NULL REFERENCES users(id),
     title VARCHAR(300) NOT NULL,
     items JSONB,
@@ -499,7 +501,7 @@ CREATE TABLE IF NOT EXISTS station_supply_requests (
 
 CREATE TABLE IF NOT EXISTS station_abandonment_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    station_id UUID REFERENCES space_stations(id),
+    station_id UUID REFERENCES stations(id),
     requested_by UUID NOT NULL REFERENCES users(id),
     reason TEXT NOT NULL,
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
@@ -740,6 +742,7 @@ CREATE TABLE IF NOT EXISTS votes (
     yay_count INTEGER DEFAULT 0,
     nay_count INTEGER DEFAULT 0,
     abstain_count INTEGER DEFAULT 0,
+    interrupted_by UUID REFERENCES users(id),
     deadline TIMESTAMPTZ,
     snooze_count INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -757,7 +760,7 @@ CREATE TABLE IF NOT EXISTS vote_records (
     UNIQUE(vote_id, director_id)
 );
 
-CREATE TABLE IF NOT EXISTS director_meetings (
+CREATE TABLE IF NOT EXISTS meetings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(300) NOT NULL,
     description TEXT,
@@ -771,7 +774,7 @@ CREATE TABLE IF NOT EXISTS director_meetings (
 
 CREATE TABLE IF NOT EXISTS meeting_attendees (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    meeting_id UUID NOT NULL REFERENCES director_meetings(id),
+    meeting_id UUID NOT NULL REFERENCES meetings(id),
     attendee_id UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -782,7 +785,7 @@ CREATE TABLE IF NOT EXISTS staff_relocations (
     from_location VARCHAR(300),
     to_location VARCHAR(300) NOT NULL,
     relocation_type VARCHAR(20) DEFAULT 'permanent' CHECK (relocation_type IN ('permanent', 'temporary')),
-    relocated_by UUID NOT NULL REFERENCES users(id),
+    requested_by UUID NOT NULL REFERENCES users(id),
     start_date DATE,
     end_date DATE,
     reason TEXT,
