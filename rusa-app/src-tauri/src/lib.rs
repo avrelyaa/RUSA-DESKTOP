@@ -12,7 +12,7 @@ pub fn run() {
             let _app_handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
                 let database_url = std::env::var("DATABASE_URL")
-                    .unwrap_or_else(|_| "postgres://rusa_user:rusa_password@localhost/rusa_ims".to_string());
+                    .unwrap_or_else(|_| "postgres://rusa:rusa@localhost:5432/rusa_ims".to_string());
                 let redis_url = std::env::var("REDIS_URL")
                     .unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
 
