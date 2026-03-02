@@ -11,10 +11,8 @@ struct BudgetRequestRow {
     amount: Option<f64>,
     items: Option<String>,
     status: Option<String>,
-    submitted_by: Option<Uuid>,
-    reviewed_by: Option<Uuid>,
-    notes: Option<String>,
-    flagged: Option<bool>,
+    requested_by: Option<Uuid>,
+    accountant_notes: Option<String>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -27,8 +25,8 @@ struct ExpenditureReportRow {
     items: Option<String>,
     invoice_data: Option<String>,
     status: Option<String>,
-    submitted_by: Option<Uuid>,
-    flagged: Option<bool>,
+    reported_by: Option<Uuid>,
+    is_flagged: Option<bool>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -49,11 +47,11 @@ pub async fn get_budget_requests(token: String) -> Result<Vec<serde_json::Value>
 
     let rows = if session.role_name == "the_accountant" {
         sqlx::query_as::<_, BudgetRequestRow>(
-            "SELECT id, title, description, amount, items, status, submitted_by, reviewed_by, notes, flagged, created_at FROM budget_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, created_at FROM budget_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
     } else {
         sqlx::query_as::<_, BudgetRequestRow>(
-            "SELECT id, title, description, amount, items, status, submitted_by, reviewed_by, notes, flagged, created_at FROM budget_requests WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, created_at FROM budget_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         ).bind(session.user_id).fetch_all(db::get_db()).await
     }.map_err(|e| format!("DB error: {}", e))?;
 
@@ -72,8 +70,8 @@ pub async fn review_budget_request(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
-    sqlx::query("UPDATE budget_requests SET status = $1, reviewed_by = $2, notes = $3 WHERE id = $4 AND deleted_at IS NULL")
-        .bind(&status).bind(session.user_id).bind(&notes).bind(rid)
+    sqlx::query("UPDATE budget_requests SET status = $1, accountant_notes = $2 WHERE id = $3 AND deleted_at IS NULL")
+        .bind(&status).bind(&notes).bind(rid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
@@ -93,7 +91,7 @@ pub async fn flag_budget_request(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
-    sqlx::query("UPDATE budget_requests SET flagged = true, notes = $1 WHERE id = $2 AND deleted_at IS NULL")
+    sqlx::query("UPDATE budget_requests SET status = 'flagged', accountant_notes = $1 WHERE id = $2 AND deleted_at IS NULL")
         .bind(&reason).bind(rid)
         .execute(db::get_db())
         .await
@@ -109,11 +107,11 @@ pub async fn get_expenditure_reports(token: String) -> Result<Vec<serde_json::Va
 
     let rows = if session.role_name == "the_accountant" {
         sqlx::query_as::<_, ExpenditureReportRow>(
-            "SELECT id, title, description, total_amount, items, invoice_data, status, submitted_by, flagged, created_at FROM expenditure_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, created_at FROM expenditure_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
     } else {
         sqlx::query_as::<_, ExpenditureReportRow>(
-            "SELECT id, title, description, total_amount, items, invoice_data, status, submitted_by, flagged, created_at FROM expenditure_reports WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, created_at FROM expenditure_reports WHERE reported_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         ).bind(session.user_id).fetch_all(db::get_db()).await
     }.map_err(|e| format!("DB error: {}", e))?;
 
@@ -131,8 +129,8 @@ pub async fn flag_expenditure_report(
 
     let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
 
-    sqlx::query("UPDATE expenditure_reports SET flagged = true, status = 'flagged' WHERE id = $1 AND deleted_at IS NULL")
-        .bind(rid)
+    sqlx::query("UPDATE expenditure_reports SET is_flagged = true, flag_reason = $1, status = 'flagged_for_investigation' WHERE id = $2 AND deleted_at IS NULL")
+        .bind(&reason).bind(rid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;

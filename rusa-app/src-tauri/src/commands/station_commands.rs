@@ -32,7 +32,7 @@ struct MapAnnotationRow {
     description: Option<String>,
     x_position: Option<f64>,
     y_position: Option<f64>,
-    added_by: Option<Uuid>,
+    annotated_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -54,7 +54,7 @@ struct StationFindingRow {
     title: String,
     description: Option<String>,
     is_private: Option<bool>,
-    submitted_by: Option<Uuid>,
+    reported_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -118,7 +118,7 @@ pub async fn update_station_inventory(
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO station_inventory (station_id, category, item_name, quantity, unit, updated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+        "INSERT INTO station_inventory (station_id, category, item_name, quantity, unit, logged_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
     .bind(sid).bind(&category).bind(&item_name).bind(quantity).bind(&unit).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -142,14 +142,14 @@ pub async fn add_map_annotation(
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO map_annotations (station_id, section_name, description, x_position, y_position, added_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+        "INSERT INTO station_map_annotations (station_id, section_name, description, x_position, y_position, annotated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
     .bind(sid).bind(&section_name).bind(&description).bind(x_position).bind(y_position).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "ADD_MAP_ANNOTATION", Some("map_annotations"), Some(row.0), None, Some(serde_json::json!({ "section_name": section_name }))).await;
+    let _ = write_audit_log(Some(session.user_id), "ADD_MAP_ANNOTATION", Some("station_map_annotations"), Some(row.0), None, Some(serde_json::json!({ "section_name": section_name }))).await;
     Ok(row.0.to_string())
 }
 
@@ -162,7 +162,7 @@ pub async fn get_map_annotations(
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
     let rows = sqlx::query_as::<_, MapAnnotationRow>(
-        "SELECT id, station_id, section_name, description, x_position, y_position, added_by, created_at FROM map_annotations WHERE station_id = $1 AND deleted_at IS NULL ORDER BY section_name"
+        "SELECT id, station_id, section_name, description, x_position, y_position, annotated_by, created_at FROM station_map_annotations WHERE station_id = $1 AND deleted_at IS NULL ORDER BY section_name"
     )
     .bind(sid)
     .fetch_all(db::get_db())
@@ -185,14 +185,14 @@ pub async fn log_personnel_event(
     let uid = Uuid::parse_str(&user_id).map_err(|_| "Invalid user ID".to_string())?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO personnel_log (station_id, user_id, event_type, notes, logged_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
+        "INSERT INTO station_personnel_log (station_id, user_id, event_type, notes, logged_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
     )
     .bind(sid).bind(uid).bind(&event_type).bind(&notes).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "LOG_PERSONNEL_EVENT", Some("personnel_log"), Some(row.0), None, Some(serde_json::json!({ "event_type": event_type }))).await;
+    let _ = write_audit_log(Some(session.user_id), "LOG_PERSONNEL_EVENT", Some("station_personnel_log"), Some(row.0), None, Some(serde_json::json!({ "event_type": event_type }))).await;
     Ok(row.0.to_string())
 }
 
@@ -205,7 +205,7 @@ pub async fn get_personnel_log(
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
     let rows = sqlx::query_as::<_, PersonnelLogRow>(
-        "SELECT id, station_id, user_id, event_type, notes, logged_by, created_at FROM personnel_log WHERE station_id = $1 ORDER BY created_at DESC"
+        "SELECT id, station_id, user_id, event_type, notes, logged_by, created_at FROM station_personnel_log WHERE station_id = $1 ORDER BY created_at DESC"
     )
     .bind(sid)
     .fetch_all(db::get_db())
@@ -227,7 +227,7 @@ pub async fn submit_station_findings(
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO station_findings (station_id, title, description, is_private, submitted_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
+        "INSERT INTO station_findings (station_id, title, description, is_private, reported_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
     )
     .bind(sid).bind(&title).bind(&description).bind(is_private).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -248,11 +248,11 @@ pub async fn get_station_findings(
     let rows = if let Some(sid_str) = station_id {
         let sid = Uuid::parse_str(&sid_str).map_err(|_| "Invalid station ID".to_string())?;
         sqlx::query_as::<_, StationFindingRow>(
-            "SELECT id, station_id, title, description, is_private, submitted_by, created_at FROM station_findings WHERE station_id = $1 AND (is_private = false OR submitted_by = $2) AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, station_id, title, description, is_private, reported_by, created_at FROM station_findings WHERE station_id = $1 AND (is_private = false OR reported_by = $2) AND deleted_at IS NULL ORDER BY created_at DESC"
         ).bind(sid).bind(session.user_id).fetch_all(db::get_db()).await
     } else {
         sqlx::query_as::<_, StationFindingRow>(
-            "SELECT id, station_id, title, description, is_private, submitted_by, created_at FROM station_findings WHERE (is_private = false OR submitted_by = $1) AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT id, station_id, title, description, is_private, reported_by, created_at FROM station_findings WHERE (is_private = false OR reported_by = $1) AND deleted_at IS NULL ORDER BY created_at DESC"
         ).bind(session.user_id).fetch_all(db::get_db()).await
     }.map_err(|e| format!("DB error: {}", e))?;
 

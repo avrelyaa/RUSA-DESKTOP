@@ -22,11 +22,10 @@ struct LostFoundRow {
     item_name: String,
     description: Option<String>,
     found_location: Option<String>,
-    found_date: Option<chrono::DateTime<chrono::Utc>>,
+    found_date: Option<chrono::NaiveDate>,
     status: Option<String>,
-    added_by: Option<Uuid>,
+    logged_by: Option<Uuid>,
     claimed_by: Option<Uuid>,
-    claimed_at: Option<chrono::DateTime<chrono::Utc>>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -37,7 +36,7 @@ struct BroadcastRequestRow {
     content: Option<String>,
     target_audience: Option<String>,
     status: Option<String>,
-    submitted_by: Option<Uuid>,
+    requested_by: Option<Uuid>,
     reviewed_by: Option<Uuid>,
     review_notes: Option<String>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -48,8 +47,8 @@ struct SecurityFindingRow {
     id: Uuid,
     title: String,
     description: Option<String>,
-    findings_date: Option<chrono::DateTime<chrono::Utc>>,
-    submitted_by: Option<Uuid>,
+    findings_date: Option<chrono::NaiveDate>,
+    reported_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -124,18 +123,17 @@ pub async fn add_lost_found_item(
     require_role_name(&session, "earth_security")?;
 
     let fdate = found_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO lost_found (item_name, description, found_location, found_date, status, added_by) VALUES ($1,$2,$3,$4,'unclaimed',$5) RETURNING id"
+        "INSERT INTO lost_and_found (item_name, description, found_location, found_date, status, logged_by) VALUES ($1,$2,$3,$4,'unclaimed',$5) RETURNING id"
     )
     .bind(&item_name).bind(&description).bind(&found_location).bind(fdate).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "ADD_LOST_FOUND", Some("lost_found"), Some(row.0), None, Some(serde_json::json!({ "item_name": item_name }))).await;
+    let _ = write_audit_log(Some(session.user_id), "ADD_LOST_FOUND", Some("lost_and_found"), Some(row.0), None, Some(serde_json::json!({ "item_name": item_name }))).await;
     Ok(row.0.to_string())
 }
 
@@ -144,7 +142,7 @@ pub async fn get_lost_found(token: String) -> Result<Vec<serde_json::Value>, Str
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, LostFoundRow>(
-        "SELECT id, item_name, description, found_location, found_date, status, added_by, claimed_by, claimed_at, created_at FROM lost_found WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, item_name, description, found_location, found_date, status, logged_by, claimed_by, created_at FROM lost_and_found WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -158,13 +156,13 @@ pub async fn claim_lost_found(token: String, item_id: String) -> Result<(), Stri
     let session = validate_session_command(&token).await?;
     let iid = Uuid::parse_str(&item_id).map_err(|_| "Invalid item ID".to_string())?;
 
-    sqlx::query("UPDATE lost_found SET status = 'claimed', claimed_by = $1, claimed_at = NOW() WHERE id = $2 AND deleted_at IS NULL AND status = 'unclaimed'")
+    sqlx::query("UPDATE lost_and_found SET status = 'claimed', claimed_by = $1 WHERE id = $2 AND deleted_at IS NULL AND status = 'unclaimed'")
         .bind(session.user_id).bind(iid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CLAIM_LOST_FOUND", Some("lost_found"), Some(iid), None, None).await;
+    let _ = write_audit_log(Some(session.user_id), "CLAIM_LOST_FOUND", Some("lost_and_found"), Some(iid), None, None).await;
     Ok(())
 }
 
@@ -178,7 +176,7 @@ pub async fn submit_broadcast_request(
     let session = validate_session_command(&token).await?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO broadcast_requests (title, content, target_audience, status, submitted_by) VALUES ($1,$2,$3,'pending',$4) RETURNING id"
+        "INSERT INTO broadcast_requests (title, content, target_audience, status, requested_by) VALUES ($1,$2,$3,'pending',$4) RETURNING id"
     )
     .bind(&title).bind(&content).bind(&target_audience).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -194,7 +192,7 @@ pub async fn get_broadcast_requests(token: String) -> Result<Vec<serde_json::Val
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, BroadcastRequestRow>(
-        "SELECT id, title, content, target_audience, status, submitted_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, content, target_audience, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -236,11 +234,10 @@ pub async fn submit_security_findings(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     let fdate = findings_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO security_findings (title, description, findings_date, submitted_by) VALUES ($1,$2,$3,$4) RETURNING id"
+        "INSERT INTO security_findings (title, description, findings_date, reported_by) VALUES ($1,$2,$3,$4) RETURNING id"
     )
     .bind(&title).bind(&description).bind(fdate).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -256,7 +253,7 @@ pub async fn get_security_findings(token: String) -> Result<Vec<serde_json::Valu
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, SecurityFindingRow>(
-        "SELECT id, title, description, findings_date, submitted_by, created_at FROM security_findings WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, description, findings_date, reported_by, created_at FROM security_findings WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
