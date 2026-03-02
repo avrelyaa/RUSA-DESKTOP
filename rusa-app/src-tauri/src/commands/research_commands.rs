@@ -25,7 +25,7 @@ struct SpeciesRow {
     classification: Option<String>,
     description: Option<String>,
     habitat: Option<String>,
-    added_by: Option<Uuid>,
+    discovered_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -159,7 +159,7 @@ pub async fn get_species_archive(token: String) -> Result<Vec<serde_json::Value>
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, SpeciesRow>(
-        "SELECT id, name, classification, description, habitat, added_by, created_at FROM species_archive WHERE deleted_at IS NULL ORDER BY name"
+        "SELECT id, name, classification, description, habitat, discovered_by, created_at FROM species_archive WHERE deleted_at IS NULL ORDER BY name"
     )
     .fetch_all(db::get_db())
     .await
@@ -179,7 +179,7 @@ pub async fn add_species(
     let session = validate_session_command(&token).await?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO species_archive (name, classification, description, habitat, added_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
+        "INSERT INTO species_archive (name, classification, description, habitat, discovered_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
     )
     .bind(&name).bind(&classification).bind(&description).bind(&habitat).bind(session.user_id)
     .fetch_one(db::get_db())

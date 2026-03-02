@@ -33,7 +33,7 @@ struct PatientRecordRow {
     treatment: Option<String>,
     medications: Option<String>,
     notes: Option<String>,
-    created_by: Option<Uuid>,
+    treated_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -42,8 +42,7 @@ struct SpecializationRow {
     id: Uuid,
     staff_id: Option<Uuid>,
     specialization: String,
-    certified_at: Option<chrono::DateTime<chrono::Utc>>,
-    added_by: Option<Uuid>,
+    certified_at: Option<chrono::NaiveDate>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -55,10 +54,8 @@ struct BudgetRequestRow {
     amount: Option<f64>,
     items: Option<String>,
     status: Option<String>,
-    submitted_by: Option<Uuid>,
-    reviewed_by: Option<Uuid>,
-    notes: Option<String>,
-    flagged: Option<bool>,
+    requested_by: Option<Uuid>,
+    accountant_notes: Option<String>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -71,8 +68,8 @@ struct ExpenditureReportRow {
     items: Option<String>,
     invoice_data: Option<String>,
     status: Option<String>,
-    submitted_by: Option<Uuid>,
-    flagged: Option<bool>,
+    reported_by: Option<Uuid>,
+    is_flagged: Option<bool>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -177,7 +174,7 @@ pub async fn create_patient_record(
     let pid = Uuid::parse_str(&patient_id).map_err(|_| "Invalid patient ID".to_string())?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO patient_records (patient_id, diagnosis, treatment, medications, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+        "INSERT INTO patient_records (patient_id, diagnosis, treatment, medications, notes, treated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
     .bind(pid).bind(&diagnosis).bind(&treatment).bind(&medications).bind(&notes).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -202,7 +199,7 @@ pub async fn get_patient_records(
     let pid = Uuid::parse_str(&patient_id).map_err(|_| "Invalid patient ID".to_string())?;
 
     let rows = sqlx::query_as::<_, PatientRecordRow>(
-        "SELECT id, patient_id, diagnosis, treatment, medications, notes, created_by, created_at FROM patient_records WHERE patient_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, patient_id, diagnosis, treatment, medications, notes, treated_by, created_at FROM patient_records WHERE patient_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
     )
     .bind(pid)
     .fetch_all(db::get_db())
@@ -222,13 +219,12 @@ pub async fn add_specialization(
     let session = validate_session_command(&token).await?;
     let sid = Uuid::parse_str(&staff_id).map_err(|_| "Invalid staff ID".to_string())?;
     let cdate = certified_at.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO staff_specializations (staff_id, specialization, certified_at, added_by) VALUES ($1,$2,$3,$4) RETURNING id"
+        "INSERT INTO staff_specializations (staff_id, specialization, certified_at) VALUES ($1,$2,$3) RETURNING id"
     )
-    .bind(sid).bind(&specialization).bind(cdate).bind(session.user_id)
+    .bind(sid).bind(&specialization).bind(cdate)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
@@ -242,7 +238,7 @@ pub async fn get_staff_specializations(token: String) -> Result<Vec<serde_json::
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, SpecializationRow>(
-        "SELECT id, staff_id, specialization, certified_at, added_by, created_at FROM staff_specializations ORDER BY specialization"
+        "SELECT id, staff_id, specialization, certified_at, created_at FROM staff_specializations ORDER BY specialization"
     )
     .fetch_all(db::get_db())
     .await
@@ -265,7 +261,7 @@ pub async fn submit_budget_request(
     }
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO budget_requests (title, description, amount, items, status, submitted_by) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id"
+        "INSERT INTO budget_requests (title, description, amount, items, status, requested_by) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id"
     )
     .bind(&title).bind(&description).bind(amount).bind(&items).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -288,7 +284,7 @@ pub async fn submit_expenditure_report(
     let session = validate_session_command(&token).await?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO expenditure_reports (title, description, total_amount, items, invoice_data, status, submitted_by) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id"
+        "INSERT INTO expenditure_reports (title, description, total_amount, items, invoice_data, status, reported_by) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id"
     )
     .bind(&title).bind(&description).bind(total_amount).bind(&items).bind(&invoice_data).bind(session.user_id)
     .fetch_one(db::get_db())
