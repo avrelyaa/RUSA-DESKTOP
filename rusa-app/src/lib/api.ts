@@ -135,6 +135,8 @@ export const settlementApi = {
   getInventory: (token: string, settlementId: string) => invoke<any[]>('get_settlement_inventory', { token, settlementId }),
   submitFarmReport: (token: string, settlementId?: string, title?: string, content?: string, cropStatus?: string, healthCheckNotes?: string) =>
     invoke<string>('submit_farm_report', { token, settlementId, title, content, cropStatus, healthCheckNotes }),
+  getSupplyRequests: (token: string) => invoke<any[]>('get_supply_requests', { token }),
+  getAnomalyReports: (token: string) => invoke<any[]>('get_anomaly_reports', { token }),
 };
 
 // Space Station

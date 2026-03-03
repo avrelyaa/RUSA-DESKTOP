@@ -42,6 +42,18 @@ struct SupplyRequestRow {
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
+struct AnomalyReportRow {
+    id: Uuid,
+    title: String,
+    description: Option<String>,
+    severity: Option<String>,
+    status: Option<String>,
+    settlement_id: Option<Uuid>,
+    reported_by: Option<Uuid>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
 struct InventoryRow {
     id: Uuid,
     settlement_id: Option<Uuid>,
@@ -70,7 +82,7 @@ pub async fn get_settlements(token: String) -> Result<Vec<serde_json::Value>, St
 pub async fn get_settler_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "the_commander" || session.tier >= 3 {
+    let rows = if session.role_name == "settler_commander" || session.tier >= 3 {
         sqlx::query_as::<_, SettlerTaskRow>(
             "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
@@ -93,7 +105,7 @@ pub async fn assign_settler_task(
     settlement_id: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "the_commander")?;
+    require_role_name(&session, "settler_commander")?;
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
@@ -142,7 +154,7 @@ pub async fn submit_supply_request(
     items: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "the_commander")?;
+    require_role_name(&session, "settler_commander")?;
 
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
@@ -156,6 +168,20 @@ pub async fn submit_supply_request(
 
     let _ = write_audit_log(Some(session.user_id), "SUBMIT_SUPPLY_REQUEST", Some("settlement_supply_requests"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
     Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_supply_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = sqlx::query_as::<_, SupplyRequestRow>(
+        "SELECT id, title, description, items, status, settlement_id, requested_by, reviewed_by, notes, created_at FROM settlement_supply_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+    )
+    .fetch_all(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
 
 #[tauri::command]
@@ -189,7 +215,7 @@ pub async fn submit_anomaly_report(
     severity: String,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "the_commander")?;
+    require_role_name(&session, "settler_commander")?;
 
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
@@ -203,6 +229,20 @@ pub async fn submit_anomaly_report(
 
     let _ = write_audit_log(Some(session.user_id), "SUBMIT_ANOMALY_REPORT", Some("anomaly_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title, "severity": severity }))).await;
     Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_anomaly_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = sqlx::query_as::<_, AnomalyReportRow>(
+        "SELECT id, title, description, severity, status, settlement_id, reported_by, created_at FROM anomaly_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
+    )
+    .fetch_all(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
 
 #[tauri::command]
@@ -236,7 +276,7 @@ pub async fn issue_house_arrest(
     end_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "the_commander")?;
+    require_role_name(&session, "settler_commander")?;
 
     let settler = Uuid::parse_str(&settler_id).map_err(|_| "Invalid settler ID".to_string())?;
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
@@ -266,7 +306,7 @@ pub async fn submit_send_to_earth(
     reason: String,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "the_commander")?;
+    require_role_name(&session, "settler_commander")?;
 
     let settler = Uuid::parse_str(&settler_id).map_err(|_| "Invalid settler ID".to_string())?;
 
@@ -357,7 +397,7 @@ pub async fn submit_farm_report(
     health_check_notes: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_farmer" && session.role_name != "the_commander" {
+    if session.role_name != "farmer" && session.role_name != "settler_commander" {
         return Err("Only farmers or commanders can submit farm reports".to_string());
     }
 

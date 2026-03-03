@@ -96,6 +96,8 @@ pub fn run() {
             commands::settlement_commands::log_settlement_inventory,
             commands::settlement_commands::get_settlement_inventory,
             commands::settlement_commands::submit_farm_report,
+            commands::settlement_commands::get_supply_requests,
+            commands::settlement_commands::get_anomaly_reports,
             // station
             commands::station_commands::get_stations,
             commands::station_commands::get_station_inventory,

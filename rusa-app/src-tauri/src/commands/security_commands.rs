@@ -120,7 +120,7 @@ pub async fn add_lost_found_item(
     found_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "earth_security")?;
+    require_role_name(&session, "earth_security_head")?;
 
     let fdate = found_date.as_deref()
         .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());

@@ -39,7 +39,11 @@
     const s = $session; if (!s) return;
     loading = true;
     try {
-      tasks = await settlementApi.getTasks(s.token);
+      [tasks, supplyReqs, anomalies] = await Promise.all([
+        settlementApi.getTasks(s.token),
+        settlementApi.getSupplyRequests(s.token),
+        settlementApi.getAnomalyReports(s.token),
+      ]);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });

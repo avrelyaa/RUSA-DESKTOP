@@ -849,6 +849,7 @@ INSERT INTO roles (id, name, display_name, tier, subsystem) VALUES
 (gen_random_uuid(), 'galactic_security_head', 'Galactic Security Head', 2, 'security'),
 (gen_random_uuid(), 'galactic_security_staff', 'Galactic Security Staff', 1, 'security'),
 (gen_random_uuid(), 'astronaut', 'Astronaut', 1, 'astronautics'),
+(gen_random_uuid(), 'aerospace_engineer', 'Aerospace Engineer', 1, 'astronautics'),
 (gen_random_uuid(), 'settler_commander', 'Settler Commander', 2, 'settlement'),
 (gen_random_uuid(), 'civil_engineer', 'Civil Engineer (Settler)', 1, 'settlement'),
 (gen_random_uuid(), 'farmer', 'Farmer', 1, 'settlement'),
@@ -876,7 +877,7 @@ INSERT INTO roles (id, name, display_name, tier, subsystem) VALUES
 (gen_random_uuid(), 'the_librarian', 'The Librarian (Director)', 3, 'governance'),
 (gen_random_uuid(), 'the_nomad', 'The Nomad (Director)', 3, 'governance'),
 (gen_random_uuid(), 'the_overseer', 'The Overseer (Director)', 3, 'security'),
-(gen_random_uuid(), 'the_director', 'The Director', 3, 'governance'),
+(gen_random_uuid(), 'the_director', 'The Director (Director)', 3, 'governance'),
 -- Tier 4: Admin
-(gen_random_uuid(), 'the_administrator', 'The Administrator', 4, 'administration')
+(gen_random_uuid(), 'the_administrator', 'The Administrator (Admin)', 4, 'administration')
 ON CONFLICT (name) DO NOTHING;
