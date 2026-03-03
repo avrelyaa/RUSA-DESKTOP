@@ -137,6 +137,7 @@ export const settlementApi = {
     invoke<string>('submit_farm_report', { token, settlementId, title, content, cropStatus, healthCheckNotes }),
   getSupplyRequests: (token: string) => invoke<any[]>('get_supply_requests', { token }),
   getAnomalyReports: (token: string) => invoke<any[]>('get_anomaly_reports', { token }),
+  getFarmReports: (token: string) => invoke<any[]>('get_farm_reports', { token }),
 };
 
 // Space Station
@@ -258,6 +259,18 @@ export const budgetApi = {
     invoke<void>('flag_expenditure_report', { token, reportId, reason }),
   submitInvestigation: (token: string, title: string, description: string, relatedReportId?: string) =>
     invoke<string>('submit_investigation', { token, title, description, relatedReportId }),
+};
+
+// Aerospace Engineering
+export const aerospaceApi = {
+  getWorkOrders: (token: string) => invoke<any[]>('get_work_orders', { token }),
+  createWorkOrder: (token: string, title: string, description?: string, priority?: string, systemAffected?: string) =>
+    invoke<string>('create_work_order', { token, title, description, priority, systemAffected }),
+  updateWorkOrderStatus: (token: string, workOrderId: string, status: string, notes?: string) =>
+    invoke<void>('update_work_order_status', { token, workOrderId, status, notes }),
+  submitTechnicalReport: (token: string, title: string, content: string, findings?: string, recommendations?: string) =>
+    invoke<string>('submit_technical_report', { token, title, content, findings, recommendations }),
+  getTechnicalReports: (token: string) => invoke<any[]>('get_technical_reports', { token }),
 };
 
 // Admin

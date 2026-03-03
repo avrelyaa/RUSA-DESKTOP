@@ -159,14 +159,14 @@ pub async fn submit_supply_request(
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO settlement_supply_requests (title, description, items, status, settlement_id, requested_by) VALUES ($1,$2,$3,'pending',$4,$5) RETURNING id"
+        "INSERT INTO supply_requests (title, description, items, status, settlement_id, requested_by) VALUES ($1,$2,$3,'pending',$4,$5) RETURNING id"
     )
     .bind(&title).bind(&description).bind(&items).bind(sid).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_SUPPLY_REQUEST", Some("settlement_supply_requests"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_SUPPLY_REQUEST", Some("supply_requests"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
     Ok(row.0.to_string())
 }
 
@@ -175,7 +175,7 @@ pub async fn get_supply_requests(token: String) -> Result<Vec<serde_json::Value>
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, SupplyRequestRow>(
-        "SELECT id, title, description, items, status, settlement_id, requested_by, reviewed_by, notes, created_at FROM settlement_supply_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, description, items, status, settlement_id, requested_by, reviewed_by, notes, created_at FROM supply_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -196,13 +196,13 @@ pub async fn review_supply_request(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
-    sqlx::query("UPDATE settlement_supply_requests SET status = $1, reviewed_by = $2, notes = $3 WHERE id = $4 AND deleted_at IS NULL")
+    sqlx::query("UPDATE supply_requests SET status = $1, reviewed_by = $2, notes = $3 WHERE id = $4 AND deleted_at IS NULL")
         .bind(&decision).bind(session.user_id).bind(&notes).bind(rid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "REVIEW_SUPPLY_REQUEST", Some("settlement_supply_requests"), Some(rid), None, Some(serde_json::json!({ "decision": decision }))).await;
+    let _ = write_audit_log(Some(session.user_id), "REVIEW_SUPPLY_REQUEST", Some("supply_requests"), Some(rid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }
 
@@ -404,13 +404,42 @@ pub async fn submit_farm_report(
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO farm_reports (settlement_id, title, content, crop_status, health_check_notes, submitted_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+        "INSERT INTO farm_progress_reports (settlement_id, title, content, crop_status, health_check_notes, farmer_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
     .bind(sid).bind(&title).bind(&content).bind(&crop_status).bind(&health_check_notes).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_FARM_REPORT", Some("farm_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_FARM_REPORT", Some("farm_progress_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
     Ok(row.0.to_string())
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct FarmReportRow {
+    id: Uuid,
+    settlement_id: Option<Uuid>,
+    farmer_id: Option<Uuid>,
+    title: String,
+    content: Option<String>,
+    crop_status: Option<String>,
+    health_check_notes: Option<String>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[tauri::command]
+pub async fn get_farm_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    let rows = if session.role_name == "farmer" || session.role_name == "settler_commander" || session.tier >= 3 {
+        sqlx::query_as::<_, FarmReportRow>(
+            "SELECT id, settlement_id, farmer_id, title, content, crop_status, health_check_notes, created_at FROM farm_progress_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetch_all(db::get_db()).await
+    } else {
+        sqlx::query_as::<_, FarmReportRow>(
+            "SELECT id, settlement_id, farmer_id, title, content, crop_status, health_check_notes, created_at FROM farm_progress_reports WHERE farmer_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        ).bind(session.user_id).fetch_all(db::get_db()).await
+    }.map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }

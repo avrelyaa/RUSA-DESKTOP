@@ -8,12 +8,13 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'tasks' | 'supply' | 'anomalies';
+  type Tab = 'tasks' | 'supply' | 'anomalies' | 'farm_reports';
   let activeTab = $state<Tab>('tasks');
 
   let tasks: any[] = $state([]);
   let supplyReqs: any[] = $state([]);
   let anomalies: any[] = $state([]);
+  let farmReports: any[] = $state([]);
   let loading = $state(false);
 
   // Task form
@@ -35,14 +36,22 @@
   let aDesc = $state('');
   let aSeverity = $state('');
 
+  // Farm report form
+  let farmOpen = $state(false);
+  let fTitle = $state('');
+  let fContent = $state('');
+  let fCropStatus = $state('');
+  let fHealthNotes = $state('');
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, supplyReqs, anomalies] = await Promise.all([
+      [tasks, supplyReqs, anomalies, farmReports] = await Promise.all([
         settlementApi.getTasks(s.token),
         settlementApi.getSupplyRequests(s.token),
         settlementApi.getAnomalyReports(s.token),
+        settlementApi.getFarmReports(s.token),
       ]);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
@@ -79,6 +88,17 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitFarmReport() {
+    const s = $session; if (!s) return;
+    if (!fTitle || !fContent) { showToast('Title and content required', 'error'); return; }
+    try {
+      await settlementApi.submitFarmReport(s.token, undefined, fTitle, fContent, fCropStatus || undefined, fHealthNotes || undefined);
+      showToast('Farm report submitted', 'success');
+      farmOpen = false; fTitle = ''; fContent = ''; fCropStatus = ''; fHealthNotes = '';
+      farmReports = await settlementApi.getFarmReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   const taskCols = [
     { key: 'title', label: 'Task' },
     { key: 'assigned_to_name', label: 'Assigned To' },
@@ -100,6 +120,9 @@
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
     <button class="tab" class:active={activeTab==='supply'} onclick={() => activeTab='supply'}>Supply Requests</button>
     <button class="tab" class:active={activeTab==='anomalies'} onclick={() => activeTab='anomalies'}>Anomaly Reports</button>
+    {#if $session?.role_name === 'farmer' || $session?.role_name === 'settler_commander'}
+      <button class="tab" class:active={activeTab==='farm_reports'} onclick={() => activeTab='farm_reports'}>Farm Reports</button>
+    {/if}
   </div>
 
   {#if loading}
@@ -122,6 +145,14 @@
       <button class="btn-primary" onclick={() => anomalyOpen = true}>+ Report Anomaly</button>
     </div>
     <Table columns={[{key:'title',label:'Title'},{key:'severity',label:'Severity'},{key:'status',label:'Status'}]} rows={anomalies} />
+  {:else if activeTab === 'farm_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Farm Reports</h2>
+      {#if $session?.role_name === 'farmer' || $session?.role_name === 'settler_commander'}
+        <button class="btn-primary" onclick={() => farmOpen = true}>+ Submit Farm Report</button>
+      {/if}
+    </div>
+    <Table columns={[{key:'title',label:'Title'},{key:'crop_status',label:'Crop Status'},{key:'created_at',label:'Created At'}]} rows={farmReports} />
   {/if}
 </PageShell>
 
@@ -158,6 +189,19 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => anomalyOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitAnomaly}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={farmOpen} title="Submit Farm Report">
+  <div class="form">
+    <Field label="Title" bind:value={fTitle} required />
+    <Field label="Content" type="textarea" bind:value={fContent} required />
+    <Field label="Crop Status" bind:value={fCropStatus} />
+    <Field label="Health Check Notes" type="textarea" bind:value={fHealthNotes} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => farmOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitFarmReport}>Submit</button>
     </div>
   </div>
 </Modal>
