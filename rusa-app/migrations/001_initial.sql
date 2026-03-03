@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     start_date DATE,
     end_date DATE,
     director_vote_id UUID,
+    reviewed_by UUID REFERENCES users(id),
+    review_notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -165,10 +167,11 @@ CREATE TABLE IF NOT EXISTS data_requests (
     description TEXT NOT NULL,
     data_type VARCHAR(200),
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'processing', 'delivered')),
-    statistician_notes TEXT,
-    processed_by UUID REFERENCES users(id),
+    reviewed_by UUID REFERENCES users(id),
+    review_notes TEXT,
     response_data TEXT,
-    response_notes TEXT,
+    responded_by UUID REFERENCES users(id),
+    delivered_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -267,7 +270,7 @@ CREATE TABLE IF NOT EXISTS missions (
     description TEXT,
     mission_type VARCHAR(20) NOT NULL CHECK (mission_type IN ('interstellar', 'terrain')),
     status VARCHAR(50) DEFAULT 'planned' CHECK (status IN ('planned', 'in_transit', 'on_location', 'returning', 'completed', 'cancelled')),
-    assigned_by UUID NOT NULL REFERENCES users(id),
+    created_by UUID NOT NULL REFERENCES users(id),
     ship_id UUID REFERENCES ships(id),
     sector_id UUID REFERENCES sectors(id),
     planet_id UUID REFERENCES planets(id),
@@ -289,7 +292,7 @@ CREATE TABLE IF NOT EXISTS mission_crew (
 CREATE TABLE IF NOT EXISTS mission_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     mission_id UUID NOT NULL REFERENCES missions(id),
-    reporter_id UUID NOT NULL REFERENCES users(id),
+    submitted_by UUID NOT NULL REFERENCES users(id),
     report_type VARCHAR(50) CHECK (report_type IN ('status', 'completion_request')),
     content TEXT NOT NULL,
     status VARCHAR(50) DEFAULT 'submitted' CHECK (status IN ('submitted', 'acknowledged', 'approved', 'rejected')),
@@ -357,6 +360,8 @@ CREATE TABLE IF NOT EXISTS supply_requests (
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'commander_approved', 'commander_rejected', 'director_approved', 'director_rejected')),
     commander_notes TEXT,
     director_notes TEXT,
+    reviewed_by UUID REFERENCES users(id),
+    notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -494,7 +499,7 @@ CREATE TABLE IF NOT EXISTS station_supply_requests (
     total_cost DECIMAL(15,2),
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
     reviewed_by UUID REFERENCES users(id),
-    review_notes TEXT,
+    notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
 );
@@ -659,7 +664,7 @@ CREATE TABLE IF NOT EXISTS wastewater_logs (
 
 CREATE TABLE IF NOT EXISTS division_transfer_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    requester_id UUID NOT NULL REFERENCES users(id),
+    requested_by UUID NOT NULL REFERENCES users(id),
     from_division VARCHAR(50) NOT NULL,
     to_division VARCHAR(50) NOT NULL,
     reason TEXT,
@@ -750,14 +755,13 @@ CREATE TABLE IF NOT EXISTS votes (
     deleted_at TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS vote_records (
+CREATE TABLE IF NOT EXISTS vote_ballots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     vote_id UUID NOT NULL REFERENCES votes(id),
-    director_id UUID NOT NULL REFERENCES users(id),
-    decision VARCHAR(10) CHECK (decision IN ('yay', 'nay', 'abstain')),
+    voter_id UUID NOT NULL REFERENCES users(id),
+    decision VARCHAR(10) CHECK (decision IN ('yes', 'no', 'abstain')),
     voted_at TIMESTAMPTZ DEFAULT NOW(),
-    switched_at TIMESTAMPTZ,
-    UNIQUE(vote_id, director_id)
+    UNIQUE(vote_id, voter_id)
 );
 
 CREATE TABLE IF NOT EXISTS meetings (
@@ -775,7 +779,7 @@ CREATE TABLE IF NOT EXISTS meetings (
 CREATE TABLE IF NOT EXISTS meeting_attendees (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     meeting_id UUID NOT NULL REFERENCES meetings(id),
-    attendee_id UUID NOT NULL REFERENCES users(id),
+    user_id UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -803,16 +807,15 @@ CREATE TABLE IF NOT EXISTS archive_permissions (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS event_logs (
+CREATE TABLE IF NOT EXISTS event_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title VARCHAR(300) NOT NULL,
     description TEXT,
-    event_date DATE,
+    event_date TIMESTAMPTZ,
     venue VARCHAR(300),
-    venue_invoice JSONB,
-    organized_by UUID NOT NULL REFERENCES users(id),
+    venue_invoice TEXT,
+    logged_by UUID NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
 );
 
