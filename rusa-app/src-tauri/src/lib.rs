@@ -98,6 +98,13 @@ pub fn run() {
             commands::settlement_commands::submit_farm_report,
             commands::settlement_commands::get_supply_requests,
             commands::settlement_commands::get_anomaly_reports,
+            commands::settlement_commands::get_farm_reports,
+            // aerospace
+            commands::aerospace_commands::get_work_orders,
+            commands::aerospace_commands::create_work_order,
+            commands::aerospace_commands::update_work_order_status,
+            commands::aerospace_commands::submit_technical_report,
+            commands::aerospace_commands::get_technical_reports,
             // station
             commands::station_commands::get_stations,
             commands::station_commands::get_station_inventory,

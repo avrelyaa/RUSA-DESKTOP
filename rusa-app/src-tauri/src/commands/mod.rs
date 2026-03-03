@@ -1,3 +1,4 @@
+pub mod aerospace_commands;
 pub mod auth_commands;
 pub mod message_commands;
 pub mod user_commands;
