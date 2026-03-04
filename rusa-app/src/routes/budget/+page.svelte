@@ -75,6 +75,15 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitAccountantNotes() {
+    const s = $session; if (!s || !selectedItem) return;
+    try {
+      await budgetApi.reviewBudget(s.token, selectedItem.id, 'under_review', reviewNotes || undefined);
+      showToast('Notes saved', 'success'); reviewOpen = false;
+      requests = await budgetApi.getBudgetRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   async function submitInvestigation() {
     const s = $session; if (!s) return;
     if (!invTitle || !invDesc) { showToast('Title and description required', 'error'); return; }
@@ -98,9 +107,7 @@
     { key: 'status', label: 'Status' },
   ];
   const statusOpts = [
-    { value: 'approved', label: 'Approved' },
-    { value: 'rejected', label: 'Rejected' },
-    { value: 'pending', label: 'Pending' },
+    { value: 'under_review', label: 'Under Review' },
   ];
 </script>
 
@@ -127,13 +134,26 @@
 <Modal bind:open={reviewOpen} title="Review: {selectedItem?.title}">
   <div class="form">
     <p class="info-text">Amount: <strong>{selectedItem?.amount || selectedItem?.total_amount}</strong></p>
-    <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
-    <Field label="Notes" type="textarea" bind:value={reviewNotes} />
-    <div class="form-actions">
-      <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
-      <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitReview}>Submit Review</button>
-    </div>
+    {#if selectedItem?.status === 'pending' && reviewType === 'budget'}
+      <div class="pending-vote-notice">
+        <span class="status-badge status-pending">⏳ Pending Director Vote</span>
+        <p class="hint-text">This request is currently awaiting a Governance vote by the Directors. Approval and rejection are handled automatically.</p>
+      </div>
+      <Field label="Accountant Notes" type="textarea" bind:value={reviewNotes} />
+      <div class="form-actions">
+        <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag for Investigation</button>
+        <button class="btn-secondary" onclick={() => reviewOpen = false}>Close</button>
+        <button class="btn-primary" onclick={submitAccountantNotes}>Save Notes</button>
+      </div>
+    {:else}
+      <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
+      <Field label="Notes" type="textarea" bind:value={reviewNotes} />
+      <div class="form-actions">
+        <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
+        <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
+        <button class="btn-primary" onclick={submitReview}>Submit Review</button>
+      </div>
+    {/if}
   </div>
 </Modal>
 
@@ -171,4 +191,8 @@
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-warning { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .pending-vote-notice { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.2); border-radius: 6px; }
+  .hint-text { font-size: 0.8rem; color: #6a7f9a; margin: 0; }
+  .status-badge { display: inline-block; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .status-pending { background: rgba(255,170,0,0.12); color: #ffaa00; }
 </style>

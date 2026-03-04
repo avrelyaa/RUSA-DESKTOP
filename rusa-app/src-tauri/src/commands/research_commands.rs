@@ -221,8 +221,28 @@ pub async fn propose_test(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "PROPOSE_TEST", Some("test_proposals"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(row.0.to_string())
+    let proposal_id = row.0;
+
+    // Automatically trigger a Governance vote for this test proposal
+    let vote_title = format!("Test Proposal: {}", title);
+    let vote_desc = description.as_ref().map(|d| format!("Auto-generated vote for test proposal. {}", d));
+    let vote_id = crate::commands::governance_commands::create_governance_vote_for_request(
+        session.user_id,
+        vote_title,
+        vote_desc,
+        proposal_id,
+        "test_proposals",
+    ).await?;
+
+    // Link the vote back to the proposal
+    sqlx::query("UPDATE test_proposals SET vote_id = $1 WHERE id = $2")
+        .bind(vote_id).bind(proposal_id)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error linking vote: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "PROPOSE_TEST", Some("test_proposals"), Some(proposal_id), None, Some(serde_json::json!({ "title": title, "vote_id": vote_id }))).await;
+    Ok(proposal_id.to_string())
 }
 
 #[tauri::command]
@@ -236,6 +256,11 @@ pub async fn review_test_proposal(
     // Requires observer or artificer role
     if session.role_name != "the_observer" && session.role_name != "the_artificer" {
         require_role(&session, 3)?;
+    }
+
+    // approved/rejected must only come from Governance votes
+    if status == "approved" || status == "rejected" {
+        return Err("Test proposals can only be approved or rejected through a Governance vote by the Directors".to_string());
     }
 
     let pid = Uuid::parse_str(&proposal_id).map_err(|_| "Invalid proposal ID".to_string())?;

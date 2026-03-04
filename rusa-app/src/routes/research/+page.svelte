@@ -127,9 +127,8 @@
     { key: 'methodology', label: 'Methodology' },
   ];
   const reviewStatusOpts = [
-    { value: 'approved', label: 'Approved' },
-    { value: 'rejected', label: 'Rejected' },
     { value: 'under_review', label: 'Under Review' },
+    { value: 'pending', label: 'Pending' },
   ];
 </script>
 
@@ -206,12 +205,22 @@
 
 <Modal bind:open={reviewOpen} title="Review {reviewTarget?.title}">
   <div class="form">
-    <Field label="Status" type="select" bind:value={reviewStatus} options={reviewStatusOpts} required />
-    <Field label="Notes" type="textarea" bind:value={reviewNotes} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitReview}>Submit Review</button>
-    </div>
+    {#if reviewTarget?.status === 'pending' && reviewType === 'test'}
+      <div class="pending-vote-notice">
+        <span class="status-badge status-pending">⏳ Pending Director Vote</span>
+        <p class="hint-text">This test proposal is awaiting a Governance vote. Approval or rejection is handled automatically once quorum is reached.</p>
+      </div>
+      <div class="form-actions">
+        <button class="btn-secondary" onclick={() => reviewOpen = false}>Close</button>
+      </div>
+    {:else}
+      <Field label="Status" type="select" bind:value={reviewStatus} options={reviewStatusOpts} required />
+      <Field label="Notes" type="textarea" bind:value={reviewNotes} />
+      <div class="form-actions">
+        <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
+        <button class="btn-primary" onclick={submitReview}>Submit Review</button>
+      </div>
+    {/if}
   </div>
 </Modal>
 
@@ -226,4 +235,8 @@
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .pending-vote-notice { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.2); border-radius: 6px; }
+  .hint-text { font-size: 0.8rem; color: #6a7f9a; margin: 0; }
+  .status-badge { display: inline-block; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .status-pending { background: rgba(255,170,0,0.12); color: #ffaa00; }
 </style>
