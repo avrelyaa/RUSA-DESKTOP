@@ -12,6 +12,7 @@ struct VoteRow {
     initiated_by: Option<Uuid>,
     interrupted_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -22,6 +23,7 @@ struct VoteDetailRow {
     status: Option<String>,
     initiated_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    deadline: Option<chrono::DateTime<chrono::Utc>>,
     yes_count: Option<i64>,
     no_count: Option<i64>,
     abstain_count: Option<i64>,
@@ -73,7 +75,7 @@ pub async fn initiate_vote(
     require_role(&session, 3)?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO votes (title, description, status, initiated_by) VALUES ($1,$2,'open',$3) RETURNING id"
+        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes') RETURNING id"
     )
     .bind(&title).bind(&description).bind(session.user_id)
     .fetch_one(db::get_db())
@@ -98,6 +100,25 @@ pub async fn cast_vote(
 
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
+    // Check that the vote is still open and within the 15-minute window
+    let vote_check: Option<(String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT status, deadline FROM votes WHERE id = $1 AND deleted_at IS NULL"
+    )
+    .bind(vid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (vstatus, vdeadline) = vote_check.ok_or_else(|| "Vote not found".to_string())?;
+    if vstatus != "open" {
+        return Err(format!("Vote is no longer open (status: {})", vstatus));
+    }
+    if let Some(dl) = vdeadline {
+        if chrono::Utc::now() > dl {
+            return Err("Voting window has expired (15-minute limit reached)".to_string());
+        }
+    }
+
     // Upsert: allow switching within the time window
     sqlx::query(
         r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
@@ -117,8 +138,22 @@ pub async fn cast_vote(
 pub async fn get_votes(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
+    // Lazily resolve expired votes
+    sqlx::query(
+        r#"UPDATE votes SET status = CASE
+            WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
+                 (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'no')
+            THEN 'passed'
+            ELSE 'failed'
+        END
+        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()"#
+    )
+    .execute(db::get_db())
+    .await
+    .ok(); // best-effort, don't fail on error
+
     let rows = sqlx::query_as::<_, VoteRow>(
-        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at, deadline FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -136,7 +171,7 @@ pub async fn get_vote_details(
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
     let row = sqlx::query_as::<_, VoteDetailRow>(
-        r#"SELECT v.id, v.title, v.description, v.status, v.initiated_by, v.created_at,
+        r#"SELECT v.id, v.title, v.description, v.status, v.initiated_by, v.created_at, v.deadline,
                   (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'yes') as yes_count,
                   (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'no') as no_count,
                   (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'abstain') as abstain_count
