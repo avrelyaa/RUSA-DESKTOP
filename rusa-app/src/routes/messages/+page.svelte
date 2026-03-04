@@ -14,9 +14,14 @@
   let composeOpen = $state(false);
   let loading = $state(false);
 
-  let toInput = $state('');
-  let ccInput = $state('');
-  let bccInput = $state('');
+  // Compose state
+  let allUsers: any[] = $state([]);
+  let toSelected: any[] = $state([]);
+  let ccSelected: any[] = $state([]);
+  let bccSelected: any[] = $state([]);
+  let toSearch = $state('');
+  let ccSearch = $state('');
+  let bccSearch = $state('');
   let subject = $state('');
   let body = $state('');
 
@@ -51,6 +56,18 @@
     loading = false;
   }
 
+  async function openCompose() {
+    const s = $session; if (!s) return;
+    subject = ''; body = ''; toSelected = []; ccSelected = []; bccSelected = [];
+    toSearch = ''; ccSearch = ''; bccSearch = '';
+    try {
+      allUsers = await userApi.getAll(s.token);
+    } catch {
+      allUsers = [];
+    }
+    composeOpen = true;
+  }
+
   async function openMessage(msg: any) {
     const s = $session;
     if (!s) return;
@@ -65,11 +82,20 @@
     const s = $session;
     if (!s) return;
     if (!subject || !body) { showToast('Subject and body required', 'error'); return; }
-    const parseIds = (input: string) => input.split(',').map(x => x.trim()).filter(Boolean);
+    if (toSelected.length === 0 && ccSelected.length === 0 && bccSelected.length === 0) {
+      showToast('Please select at least one recipient', 'error'); return;
+    }
     try {
-      await messageApi.send(s.token, parseIds(toInput), parseIds(ccInput), parseIds(bccInput), subject, body);
+      await messageApi.send(
+        s.token,
+        toSelected.map(u => u.id),
+        ccSelected.map(u => u.id),
+        bccSelected.map(u => u.id),
+        subject,
+        body
+      );
       showToast('Message sent!', 'success');
-      composeOpen = false; subject = ''; body = ''; toInput = ''; ccInput = ''; bccInput = '';
+      composeOpen = false;
       await loadMessages();
     } catch (e: any) {
       showToast('Failed to send: ' + e, 'error');
@@ -89,6 +115,26 @@
     }
   }
 
+  function addRecipient(list: any[], user: any): any[] {
+    if (list.find(u => u.id === user.id)) return list;
+    return [...list, user];
+  }
+  function removeRecipient(list: any[], userId: string): any[] {
+    return list.filter(u => u.id !== userId);
+  }
+
+  function filteredUsers(search: string, excluded: any[]): any[] {
+    const q = search.toLowerCase();
+    return allUsers.filter(u =>
+      !excluded.find(e => e.id === u.id) &&
+      (u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q))
+    ).slice(0, 8);
+  }
+
+  let toSuggestions = $derived(toSearch.length > 0 ? filteredUsers(toSearch, [...toSelected, ...ccSelected, ...bccSelected]) : []);
+  let ccSuggestions = $derived(ccSearch.length > 0 ? filteredUsers(ccSearch, [...toSelected, ...ccSelected, ...bccSelected]) : []);
+  let bccSuggestions = $derived(bccSearch.length > 0 ? filteredUsers(bccSearch, [...toSelected, ...ccSelected, ...bccSelected]) : []);
+
   let currentList = $derived(activeTab === 'inbox' ? inbox : sent);
   let unread = $derived(inbox.filter(m => !m.read_at).length);
 </script>
@@ -104,7 +150,7 @@
         </button>
         <button class="tab" class:active={activeTab==='sent'} onclick={() => activeTab='sent'}>Sent</button>
       </div>
-      <button class="compose-btn" onclick={() => composeOpen = true}>+ Compose</button>
+      <button class="compose-btn" onclick={openCompose}>+ Compose</button>
       <div class="message-list">
         {#if loading}
           <p class="list-empty">Loading...</p>
@@ -147,17 +193,62 @@
 
 <Modal bind:open={composeOpen} title="New Message">
   <div class="compose-form">
+    <!-- To field -->
     <div class="field">
-      <label class="field-label" for="compose-to">To (User IDs, comma-separated)</label>
-      <input id="compose-to" class="field-input" bind:value={toInput} placeholder="user-id-1, user-id-2" />
+      <label class="field-label" for="compose-to-search">To</label>
+      <div class="recipient-tokens">
+        {#each toSelected as u}
+          <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => toSelected = removeRecipient(toSelected, u.id)}>×</button></span>
+        {/each}
+        <div class="autocomplete-wrap">
+          <input id="compose-to-search" class="field-input inline-input" bind:value={toSearch} placeholder="Search by name or username…" />
+          {#if toSuggestions.length > 0}
+            <div class="suggestions">
+              {#each toSuggestions as u}
+                <button class="suggestion-item" onclick={() => { toSelected = addRecipient(toSelected, u); toSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
     </div>
+    <!-- CC field -->
     <div class="field">
-      <label class="field-label" for="compose-cc">CC (optional)</label>
-      <input id="compose-cc" class="field-input" bind:value={ccInput} placeholder="cc-user-id" />
+      <label class="field-label" for="compose-cc-search">CC (optional)</label>
+      <div class="recipient-tokens">
+        {#each ccSelected as u}
+          <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => ccSelected = removeRecipient(ccSelected, u.id)}>×</button></span>
+        {/each}
+        <div class="autocomplete-wrap">
+          <input id="compose-cc-search" class="field-input inline-input" bind:value={ccSearch} placeholder="Search…" />
+          {#if ccSuggestions.length > 0}
+            <div class="suggestions">
+              {#each ccSuggestions as u}
+                <button class="suggestion-item" onclick={() => { ccSelected = addRecipient(ccSelected, u); ccSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
     </div>
+    <!-- BCC field -->
     <div class="field">
-      <label class="field-label" for="compose-bcc">BCC (optional)</label>
-      <input id="compose-bcc" class="field-input" bind:value={bccInput} placeholder="bcc-user-id" />
+      <label class="field-label" for="compose-bcc-search">BCC (optional)</label>
+      <div class="recipient-tokens">
+        {#each bccSelected as u}
+          <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => bccSelected = removeRecipient(bccSelected, u.id)}>×</button></span>
+        {/each}
+        <div class="autocomplete-wrap">
+          <input id="compose-bcc-search" class="field-input inline-input" bind:value={bccSearch} placeholder="Search…" />
+          {#if bccSuggestions.length > 0}
+            <div class="suggestions">
+              {#each bccSuggestions as u}
+                <button class="suggestion-item" onclick={() => { bccSelected = addRecipient(bccSelected, u); bccSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
     </div>
     <div class="field">
       <label class="field-label" for="compose-subject">Subject *</label>
@@ -204,9 +295,21 @@
   .compose-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
-  .field-input { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.625rem 0.875rem; width: 100%; }
+  .field-input { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.625rem 0.875rem; width: 100%; box-sizing: border-box; }
   .field-input:focus { outline: none; border-color: #3d7fff; }
   textarea.field-input { resize: vertical; min-height: 120px; }
+  .recipient-tokens { display: flex; flex-wrap: wrap; gap: 0.375rem; align-items: flex-start; background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; padding: 0.375rem 0.5rem; min-height: 40px; }
+  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
+  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
+  .token-remove:hover { color: #ff4466; }
+  .autocomplete-wrap { position: relative; flex: 1; min-width: 160px; }
+  .inline-input { border: none !important; background: transparent !important; padding: 2px 4px !important; width: 100%; font-size: 0.85rem; }
+  .inline-input:focus { outline: none; }
+  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
+  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
+  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
 </style>

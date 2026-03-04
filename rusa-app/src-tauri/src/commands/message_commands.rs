@@ -34,6 +34,10 @@ pub async fn send_message(
         .filter_map(|s| Uuid::parse_str(s).ok())
         .collect();
 
+    if to_uuids.is_empty() && cc_uuids.is_empty() && bcc_uuids.is_empty() {
+        return Err("No valid recipients. Please select at least one recipient.".to_string());
+    }
+
     let sched = scheduled_at
         .as_deref()
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
