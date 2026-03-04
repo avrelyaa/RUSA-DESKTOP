@@ -55,10 +55,12 @@ export const dataApi = {
   submitRequest: (token: string, title: string, description: string, dataType?: string) =>
     invoke<string>('submit_data_request', { token, title, description, dataType }),
   getRequests: (token: string) => invoke<any[]>('get_data_requests', { token }),
-  review: (token: string, requestId: string, status: string, notes?: string) =>
-    invoke<void>('review_data_request', { token, requestId, status, notes }),
-  respond: (token: string, requestId: string, responseData: string, notes?: string) =>
-    invoke<void>('respond_to_data_request', { token, requestId, responseData, notes }),
+  review: (token: string, requestId: string, status: string, notes?: string, assignedTo?: string) =>
+    invoke<void>('review_data_request', { token, requestId, status, notes, assignedTo }),
+  startProcessing: (token: string, requestId: string) =>
+    invoke<void>('start_processing', { token, requestId }),
+  analystSubmit: (token: string, requestId: string, responseData: string, analystNotes?: string) =>
+    invoke<void>('analyst_submit_response', { token, requestId, responseData, analystNotes }),
   deliver: (token: string, requestId: string) =>
     invoke<void>('deliver_data_response', { token, requestId }),
 };

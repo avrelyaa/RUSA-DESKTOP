@@ -53,7 +53,8 @@ pub fn run() {
             commands::data_commands::submit_data_request,
             commands::data_commands::get_data_requests,
             commands::data_commands::review_data_request,
-            commands::data_commands::respond_to_data_request,
+            commands::data_commands::start_processing,
+            commands::data_commands::analyst_submit_response,
             commands::data_commands::deliver_data_response,
             // security
             commands::security_commands::create_incident_report,
