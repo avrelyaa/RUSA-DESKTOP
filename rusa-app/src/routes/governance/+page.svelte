@@ -6,7 +6,7 @@
   import { session } from '$lib/stores/auth';
   import { governanceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
 
   type Tab = 'votes' | 'meetings' | 'relocations' | 'events';
   let activeTab = $state<Tab>('votes');
@@ -144,6 +144,24 @@
     { value: 'no', label: 'No' },
     { value: 'abstain', label: 'Abstain' },
   ];
+
+  let now = $state(Date.now());
+  const ticker = setInterval(() => { now = Date.now(); }, 1000);
+  onDestroy(() => clearInterval(ticker));
+
+  function getTimeRemaining(deadline: string | null): string {
+    if (!deadline) return '';
+    const diff = new Date(deadline).getTime() - now;
+    if (diff <= 0) return 'Expired';
+    const mins = Math.floor(diff / 60000);
+    const secs = Math.floor((diff % 60000) / 1000);
+    return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+  }
+
+  function isExpired(deadline: string | null): boolean {
+    if (!deadline) return false;
+    return new Date(deadline).getTime() <= now;
+  }
   const relocTypeOpts = [
     { value: 'temporary', label: 'Temporary' },
     { value: 'permanent', label: 'Permanent' },
@@ -165,10 +183,35 @@
     <p class="loading">Loading...</p>
   {:else if activeTab === 'votes'}
     <div class="section-bar">
-      <h2 class="section-title">Active Votes</h2>
+      <h2 class="section-title">Votes</h2>
       <button class="btn-primary" onclick={() => voteOpen = true}>+ Initiate Vote</button>
     </div>
-    <Table columns={voteCols} rows={votes} onRowClick={(r) => { selectedVote = r; castDecision = ''; castOpen = true; }} />
+    {#if votes.length === 0}
+      <p class="empty">No votes found</p>
+    {:else}
+      <div class="vote-list">
+        {#each votes as vote}
+          <div class="vote-card" class:expired={vote.status !== 'open' || isExpired(vote.deadline)}>
+            <div class="vote-info">
+              <span class="vote-title">{vote.title}</span>
+              {#if vote.description}
+                <span class="vote-desc">{vote.description}</span>
+              {/if}
+              <span class="vote-meta">Initiated: {vote.created_at ? new Date(vote.created_at).toLocaleString() : ''}</span>
+            </div>
+            <div class="vote-right">
+              <span class="status-badge status-{vote.status}">{vote.status}</span>
+              {#if vote.status === 'open' && vote.deadline && !isExpired(vote.deadline)}
+                <span class="countdown">⏱ {getTimeRemaining(vote.deadline)}</span>
+                <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castOpen = true; }}>Cast Vote</button>
+              {:else if vote.status === 'open' && isExpired(vote.deadline)}
+                <span class="countdown expired-label">Resolving...</span>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {:else if activeTab === 'meetings'}
     <div class="section-bar">
       <h2 class="section-title">Meetings</h2>
@@ -203,6 +246,9 @@
 
 <Modal bind:open={castOpen} title="Cast Vote: {selectedVote?.title}">
   <div class="form">
+    {#if selectedVote?.deadline}
+      <p class="vote-timer">Time remaining: <span class="countdown">{getTimeRemaining(selectedVote.deadline)}</span></p>
+    {/if}
     <Field label="Your Decision" type="select" bind:value={castDecision} options={decisionOpts} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => castOpen = false}>Cancel</button>
@@ -263,4 +309,21 @@
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .vote-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .vote-card { display: flex; align-items: flex-start; justify-content: space-between; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 6px; padding: 1rem 1.25rem; gap: 1rem; }
+  .vote-card.expired { opacity: 0.7; }
+  .vote-info { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+  .vote-title { font-size: 0.95rem; color: #e8eeff; font-weight: 500; }
+  .vote-desc { font-size: 0.82rem; color: #6a7f9a; }
+  .vote-meta { font-size: 0.75rem; color: #4a5d82; }
+  .vote-right { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; flex-shrink: 0; }
+  .countdown { font-family: 'Space Mono', monospace; font-size: 0.8rem; color: #ffaa00; }
+  .expired-label { color: #ff4466; }
+  .status-badge { display: inline-block; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .status-open { background: rgba(0,212,255,0.15); color: #00d4ff; }
+  .status-passed { background: rgba(0,255,128,0.12); color: #00ff80; }
+  .status-failed { background: rgba(255,68,102,0.12); color: #ff4466; }
+  .status-interrupted { background: rgba(255,170,0,0.12); color: #ffaa00; }
+  .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
+  .vote-timer { font-size: 0.82rem; color: #8fa3cc; margin: 0; }
 </style>
