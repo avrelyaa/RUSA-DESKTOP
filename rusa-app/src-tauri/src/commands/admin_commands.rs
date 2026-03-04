@@ -170,11 +170,42 @@ pub async fn override_vote(
 
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
+    // Get target info before updating
+    let target: Option<(Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT target_id, target_table FROM votes WHERE id = $1"
+    )
+    .bind(vid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
     sqlx::query("UPDATE votes SET status = $1, interrupted_by = $2 WHERE id = $3")
         .bind(&outcome).bind(session.user_id).bind(vid)
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
+
+    // Sync linked request
+    if let Some((Some(tid), Some(ttable))) = target {
+        let request_status = if outcome == "passed" { "approved" } else { "rejected" };
+        match ttable.as_str() {
+            "budget_requests" => {
+                sqlx::query("UPDATE budget_requests SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+                    .bind(request_status).bind(tid)
+                    .execute(db::get_db())
+                    .await
+                    .ok();
+            }
+            "test_proposals" => {
+                sqlx::query("UPDATE test_proposals SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+                    .bind(request_status).bind(tid)
+                    .execute(db::get_db())
+                    .await
+                    .ok();
+            }
+            _ => {}
+        }
+    }
 
     let _ = write_audit_log(
         Some(session.user_id),

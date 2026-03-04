@@ -231,8 +231,8 @@ export const sanitaryApi = {
 export const governanceApi = {
   initiateVote: (token: string, title: string, description?: string) =>
     invoke<string>('initiate_vote', { token, title, description }),
-  castVote: (token: string, voteId: string, decision: string) =>
-    invoke<void>('cast_vote', { token, voteId, decision }),
+  castVote: (token: string, voteId: string, decision: string, reasoning: string) =>
+    invoke<void>('cast_vote', { token, voteId, decision, reasoning }),
   getVotes: (token: string) => invoke<any[]>('get_votes', { token }),
   getVoteDetails: (token: string, voteId: string) => invoke<any>('get_vote_details', { token, voteId }),
   interruptVote: (token: string, voteId: string) => invoke<void>('interrupt_vote', { token, voteId }),

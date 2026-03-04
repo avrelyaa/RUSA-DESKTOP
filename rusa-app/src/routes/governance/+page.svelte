@@ -26,6 +26,7 @@
   let castOpen = $state(false);
   let selectedVote: any = $state(null);
   let castDecision = $state('');
+  let castReasoning = $state('');
 
   // Meeting form
   let meetingOpen = $state(false);
@@ -78,9 +79,10 @@
   async function castVote() {
     const s = $session; if (!s || !selectedVote) return;
     if (!castDecision) { showToast('Decision required', 'error'); return; }
+    if (!castReasoning.trim()) { showToast('Reasoning is required', 'error'); return; }
     try {
-      await governanceApi.castVote(s.token, selectedVote.id, castDecision);
-      showToast('Vote cast', 'success'); castOpen = false;
+      await governanceApi.castVote(s.token, selectedVote.id, castDecision, castReasoning);
+      showToast('Vote cast', 'success'); castOpen = false; castReasoning = '';
       votes = await governanceApi.getVotes(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -201,9 +203,12 @@
             </div>
             <div class="vote-right">
               <span class="status-badge status-{vote.status}">{vote.status}</span>
+              {#if vote.snooze_count && vote.snooze_count > 0}
+                <span class="snooze-badge">⏸ Snoozed {vote.snooze_count}×</span>
+              {/if}
               {#if vote.status === 'open' && vote.deadline && !isExpired(vote.deadline)}
                 <span class="countdown">⏱ {getTimeRemaining(vote.deadline)}</span>
-                <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castOpen = true; }}>Cast Vote</button>
+                <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castReasoning = ''; castOpen = true; }}>Cast Vote</button>
               {:else if vote.status === 'open' && isExpired(vote.deadline)}
                 <span class="countdown expired-label">Resolving...</span>
               {/if}
@@ -249,10 +254,28 @@
     {#if selectedVote?.deadline}
       <p class="vote-timer">Time remaining: <span class="countdown">{getTimeRemaining(selectedVote.deadline)}</span></p>
     {/if}
-    <Field label="Your Decision" type="select" bind:value={castDecision} options={decisionOpts} required />
+    {#if selectedVote?.snooze_count && selectedVote.snooze_count > 0}
+      <p class="snooze-notice">⏸ Quorum not yet reached — vote has been extended {selectedVote.snooze_count}×</p>
+    {/if}
+    <Field label="Your Reasoning" type="textarea" bind:value={castReasoning} required rows={4} placeholder="Provide your justification for this vote..." />
+    <div class="vote-options">
+      <label class="vote-option">
+        <input type="radio" bind:group={castDecision} value="yes" /> Yes
+      </label>
+      <label class="vote-option">
+        <input type="radio" bind:group={castDecision} value="no" /> No
+      </label>
+      <label class="vote-option">
+        <input type="radio" bind:group={castDecision} value="abstain" /> Abstain
+      </label>
+    </div>
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => castOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={castVote}>Cast Vote</button>
+      <button class="btn-secondary" onclick={() => { castOpen = false; castReasoning = ''; }}>Cancel</button>
+      <button
+        class="btn-primary"
+        onclick={castVote}
+        disabled={!castDecision || !castReasoning.trim()}
+      >Submit Vote</button>
     </div>
   </div>
 </Modal>
@@ -326,4 +349,9 @@
   .status-interrupted { background: rgba(255,170,0,0.12); color: #ffaa00; }
   .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
   .vote-timer { font-size: 0.82rem; color: #8fa3cc; margin: 0; }
+  .snooze-badge { display: inline-block; font-family: 'Space Mono', monospace; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; background: rgba(255,170,0,0.12); color: #ffaa00; }
+  .snooze-notice { font-size: 0.82rem; color: #ffaa00; margin: 0; padding: 0.4rem 0.75rem; background: rgba(255,170,0,0.08); border-left: 3px solid #ffaa00; border-radius: 0 4px 4px 0; }
+  .vote-options { display: flex; gap: 1rem; }
+  .vote-option { display: flex; align-items: center; gap: 0.4rem; color: #8fa3cc; font-size: 0.85rem; cursor: pointer; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

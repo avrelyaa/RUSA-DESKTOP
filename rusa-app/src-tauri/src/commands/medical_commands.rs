@@ -268,8 +268,28 @@ pub async fn submit_budget_request(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_BUDGET_REQUEST", Some("budget_requests"), Some(row.0), None, Some(serde_json::json!({ "title": title, "amount": amount }))).await;
-    Ok(row.0.to_string())
+    let budget_id = row.0;
+
+    // Automatically trigger a Governance vote for this budget request
+    let vote_title = format!("Budget Request: {}", title);
+    let vote_desc = Some(format!("Auto-generated vote for budget request (amount: {}). {}", amount, description));
+    let vote_id = crate::commands::governance_commands::create_governance_vote_for_request(
+        session.user_id,
+        vote_title,
+        vote_desc,
+        budget_id,
+        "budget_requests",
+    ).await?;
+
+    // Link the vote back to the budget request
+    sqlx::query("UPDATE budget_requests SET vote_id = $1 WHERE id = $2")
+        .bind(vote_id).bind(budget_id)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error linking vote: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_BUDGET_REQUEST", Some("budget_requests"), Some(budget_id), None, Some(serde_json::json!({ "title": title, "amount": amount, "vote_id": vote_id }))).await;
+    Ok(budget_id.to_string())
 }
 
 #[tauri::command]

@@ -68,6 +68,11 @@ pub async fn review_budget_request(
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "the_accountant")?;
 
+    // Accountant may only move to under_review; approved/rejected come from Governance votes
+    if status == "approved" || status == "rejected" {
+        return Err("Budget requests can only be approved or rejected through a Governance vote by the Directors".to_string());
+    }
+
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
     sqlx::query("UPDATE budget_requests SET status = $1, accountant_notes = $2 WHERE id = $3 AND deleted_at IS NULL")

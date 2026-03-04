@@ -3,6 +3,11 @@ use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
 
+/// Minimum number of ballots required for a vote to be resolved.
+const VOTE_QUORUM: i64 = 8;
+/// Duration of each voting window (and snooze extension) in minutes.
+const VOTE_WINDOW_MINUTES: i64 = 15;
+
 #[derive(sqlx::FromRow, serde::Serialize)]
 struct VoteRow {
     id: Uuid,
@@ -13,6 +18,9 @@ struct VoteRow {
     interrupted_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
     deadline: Option<chrono::DateTime<chrono::Utc>>,
+    snooze_count: Option<i32>,
+    target_id: Option<Uuid>,
+    target_table: Option<String>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -27,6 +35,9 @@ struct VoteDetailRow {
     yes_count: Option<i64>,
     no_count: Option<i64>,
     abstain_count: Option<i64>,
+    snooze_count: Option<i32>,
+    target_id: Option<Uuid>,
+    target_table: Option<String>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -75,9 +86,9 @@ pub async fn initiate_vote(
     require_role(&session, 3)?;
 
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes') RETURNING id"
+        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + ($4 * INTERVAL '1 minute')) RETURNING id"
     )
-    .bind(&title).bind(&description).bind(session.user_id)
+    .bind(&title).bind(&description).bind(session.user_id).bind(VOTE_WINDOW_MINUTES)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
@@ -91,11 +102,17 @@ pub async fn cast_vote(
     token: String,
     vote_id: String,
     decision: String,
+    reasoning: String,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
     // Directors only vote
     if session.tier < 3 {
         return Err("Only directors can cast votes".to_string());
+    }
+
+    // Enforce reasoning is non-empty
+    if reasoning.trim().is_empty() {
+        return Err("A reasoning/justification is required to cast a vote".to_string());
     }
 
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
@@ -119,18 +136,18 @@ pub async fn cast_vote(
         }
     }
 
-    // Upsert: allow switching within the time window
+    // Upsert: allow switching within the time window, also update reasoning
     sqlx::query(
-        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, voted_at = NOW()"#
+        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, reasoning, voted_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, reasoning = $4, voted_at = NOW()"#
     )
-    .bind(vid).bind(session.user_id).bind(&decision)
+    .bind(vid).bind(session.user_id).bind(&decision).bind(&reasoning)
     .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision }))).await;
+    let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision, "reasoning": reasoning }))).await;
     Ok(())
 }
 
@@ -138,22 +155,91 @@ pub async fn cast_vote(
 pub async fn get_votes(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    // Lazily resolve expired votes
-    sqlx::query(
-        r#"UPDATE votes SET status = CASE
-            WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
-                 (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'no')
-            THEN 'passed'
-            ELSE 'failed'
-        END
-        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()"#
+    // Find all votes that have passed their deadline and are still 'open'
+    #[derive(sqlx::FromRow)]
+    struct ExpiredVote {
+        id: Uuid,
+        target_id: Option<Uuid>,
+        target_table: Option<String>,
+        snooze_count: i32,
+    }
+
+    let expired: Vec<ExpiredVote> = sqlx::query_as(
+        "SELECT id, target_id, target_table, snooze_count FROM votes WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW() AND deleted_at IS NULL"
     )
-    .execute(db::get_db())
+    .fetch_all(db::get_db())
     .await
-    .ok(); // best-effort, don't fail on error
+    .unwrap_or_default();
+
+    for vote in &expired {
+        // Count ballots
+        let (yes_count, no_count, abstain_count): (i64, i64, i64) = sqlx::query_as(
+            r#"SELECT
+                COUNT(*) FILTER (WHERE decision = 'yes'),
+                COUNT(*) FILTER (WHERE decision = 'no'),
+                COUNT(*) FILTER (WHERE decision = 'abstain')
+               FROM vote_ballots WHERE vote_id = $1"#
+        )
+        .bind(vote.id)
+        .fetch_one(db::get_db())
+        .await
+        .unwrap_or((0, 0, 0));
+
+        let total = yes_count + no_count + abstain_count;
+
+        if total < VOTE_QUORUM {
+            // Snooze: extend by VOTE_WINDOW_MINUTES, increment snooze_count
+            sqlx::query(
+                "UPDATE votes SET status = 'open', deadline = NOW() + ($1 * INTERVAL '1 minute'), snooze_count = snooze_count + 1 WHERE id = $2"
+            )
+            .bind(VOTE_WINDOW_MINUTES)
+            .bind(vote.id)
+            .execute(db::get_db())
+            .await
+            .ok();
+            // TODO: trigger reminder notification to Directors here
+        } else {
+            // Quorum met — resolve
+            let (new_vote_status, new_request_status) = if yes_count == 0 && no_count == 0 {
+                // All abstain → failed
+                ("failed", "rejected")
+            } else if yes_count > no_count {
+                ("passed", "approved")
+            } else {
+                ("failed", "rejected")
+            };
+
+            sqlx::query("UPDATE votes SET status = $1 WHERE id = $2")
+                .bind(new_vote_status).bind(vote.id)
+                .execute(db::get_db())
+                .await
+                .ok();
+
+            // Sync linked request status
+            if let (Some(tid), Some(ttable)) = (vote.target_id, vote.target_table.as_deref()) {
+                match ttable {
+                    "budget_requests" => {
+                        sqlx::query("UPDATE budget_requests SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+                            .bind(new_request_status).bind(tid)
+                            .execute(db::get_db())
+                            .await
+                            .ok();
+                    }
+                    "test_proposals" => {
+                        sqlx::query("UPDATE test_proposals SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+                            .bind(new_request_status).bind(tid)
+                            .execute(db::get_db())
+                            .await
+                            .ok();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 
     let rows = sqlx::query_as::<_, VoteRow>(
-        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at, deadline FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at, deadline, snooze_count, target_id, target_table FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -174,7 +260,8 @@ pub async fn get_vote_details(
         r#"SELECT v.id, v.title, v.description, v.status, v.initiated_by, v.created_at, v.deadline,
                   (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'yes') as yes_count,
                   (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'no') as no_count,
-                  (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'abstain') as abstain_count
+                  (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'abstain') as abstain_count,
+                  v.snooze_count, v.target_id, v.target_table
            FROM votes v WHERE v.id = $1"#
     )
     .bind(vid)
@@ -184,6 +271,44 @@ pub async fn get_vote_details(
     .ok_or_else(|| "Vote not found".to_string())?;
 
     Ok(serde_json::to_value(row).unwrap_or_default())
+}
+
+/// Creates a Governance vote linked to a specific request.
+/// Called automatically when a pending request is inserted.
+pub async fn create_governance_vote_for_request(
+    initiated_by: Uuid,
+    title: String,
+    description: Option<String>,
+    target_id: Uuid,
+    target_table: &str,
+) -> Result<Uuid, String> {
+    let row: (Uuid,) = sqlx::query_as(
+        r#"INSERT INTO votes (title, description, status, initiated_by, deadline, target_id, target_table)
+           VALUES ($1, $2, 'open', $3, NOW() + ($6 * INTERVAL '1 minute'), $4, $5)
+           RETURNING id"#
+    )
+    .bind(&title)
+    .bind(&description)
+    .bind(initiated_by)
+    .bind(target_id)
+    .bind(target_table)
+    .bind(VOTE_WINDOW_MINUTES)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error creating governance vote: {}", e))?;
+
+    let vote_id = row.0;
+
+    let _ = write_audit_log(
+        Some(initiated_by),
+        "AUTO_INITIATE_VOTE",
+        Some("votes"),
+        Some(vote_id),
+        None,
+        Some(serde_json::json!({ "target_id": target_id, "target_table": target_table, "title": title })),
+    ).await;
+
+    Ok(vote_id)
 }
 
 #[tauri::command]
