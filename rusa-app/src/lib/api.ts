@@ -108,6 +108,11 @@ export const astronautApi = {
     invoke<void>('rename_sector', { token, sectorId, newName }),
   getShips: (token: string) => invoke<any[]>('get_ships', { token }),
   getStats: (token: string, astronautId?: string) => invoke<any>('get_astronaut_stats', { token, astronautId }),
+  submitConclusionRequest: (token: string, missionId: string, reportSummary?: string) =>
+    invoke<string>('submit_conclusion_request', { token, missionId, reportSummary }),
+  getConclusionRequests: (token: string) => invoke<any[]>('get_conclusion_requests', { token }),
+  reviewConclusionRequest: (token: string, requestId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_conclusion_request', { token, requestId, decision, reviewNotes }),
 };
 
 // Settlement
@@ -287,6 +292,17 @@ export const adminApi = {
     invoke<any[]>('get_audit_log', { token, limit, offset }),
   overrideVote: (token: string, voteId: string, outcome: string) =>
     invoke<void>('override_vote', { token, voteId, outcome }),
+};
+
+// Research Tasks (Observer/Artificer proxy chain)
+export const researchTaskApi = {
+  assign: (token: string, title: string, description?: string, assignedTo?: string, sourceMessageId?: string, dueDate?: string) =>
+    invoke<string>('assign_research_task', { token, title, description, assignedTo, sourceMessageId, dueDate }),
+  getTasks: (token: string) => invoke<any[]>('get_research_tasks', { token }),
+  submitResult: (token: string, taskId: string, resultNotes: string) =>
+    invoke<void>('submit_research_task_result', { token, taskId, resultNotes }),
+  complete: (token: string, taskId: string) =>
+    invoke<void>('complete_research_task', { token, taskId }),
 };
 
 // Types

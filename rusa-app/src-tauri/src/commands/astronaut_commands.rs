@@ -4,6 +4,38 @@ use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
+struct MissionConclusionRequestRow {
+    id: Uuid,
+    mission_id: Uuid,
+    submitted_by: Option<Uuid>,
+    report_summary: Option<String>,
+    status: String,
+    reviewed_by: Option<Uuid>,
+    review_notes: Option<String>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn ensure_conclusion_requests_table() -> Result<(), String> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS mission_conclusion_requests (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            mission_id UUID NOT NULL REFERENCES missions(id),
+            submitted_by UUID REFERENCES users(id),
+            report_summary TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by UUID REFERENCES users(id),
+            review_notes TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )"#,
+    )
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error creating table: {}", e))?;
+    Ok(())
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
 struct MissionRow {
     id: Uuid,
     title: String,
@@ -116,6 +148,10 @@ pub async fn update_mission_status(
     let session = validate_session_command(&token).await?;
     if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" {
         return Err("Only wanderer or taskmaster can update mission status".to_string());
+    }
+
+    if status == "completed" {
+        return Err("Use the conclusion request workflow to mark missions as completed".to_string());
     }
 
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
@@ -340,4 +376,135 @@ pub async fn get_astronaut_stats(
     .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(serde_json::to_value(stats).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn submit_conclusion_request(
+    token: String,
+    mission_id: String,
+    report_summary: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "astronaut" {
+        return Err("Only astronauts can submit conclusion requests".to_string());
+    }
+
+    ensure_conclusion_requests_table().await?;
+
+    let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO mission_conclusion_requests (mission_id, submitted_by, report_summary, status) VALUES ($1,$2,$3,'pending') RETURNING id"
+    )
+    .bind(mid)
+    .bind(session.user_id)
+    .bind(&report_summary)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "SUBMIT_CONCLUSION_REQUEST",
+        Some("mission_conclusion_requests"),
+        Some(row.0),
+        None,
+        Some(serde_json::json!({ "mission_id": mission_id })),
+    )
+    .await;
+
+    Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_conclusion_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    ensure_conclusion_requests_table().await?;
+
+    let rows = if session.role_name == "the_wanderer" || session.role_name == "the_taskmaster" {
+        sqlx::query_as::<_, MissionConclusionRequestRow>(
+            "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        )
+        .fetch_all(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+    } else {
+        sqlx::query_as::<_, MissionConclusionRequestRow>(
+            "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        )
+        .bind(session.user_id)
+        .fetch_all(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap_or_default())
+        .collect())
+}
+
+#[tauri::command]
+pub async fn review_conclusion_request(
+    token: String,
+    request_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" {
+        return Err(
+            "Only the_wanderer or the_taskmaster can review conclusion requests".to_string(),
+        );
+    }
+
+    ensure_conclusion_requests_table().await?;
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    if decision != "approved" && decision != "rejected" {
+        return Err("Decision must be 'approved' or 'rejected'".to_string());
+    }
+
+    let req: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT mission_id FROM mission_conclusion_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(rid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (mission_id,) = req.ok_or_else(|| "Conclusion request not found".to_string())?;
+
+    sqlx::query(
+        "UPDATE mission_conclusion_requests SET status = $1, reviewed_by = $2, review_notes = $3 WHERE id = $4 AND deleted_at IS NULL"
+    )
+    .bind(&decision)
+    .bind(session.user_id)
+    .bind(&review_notes)
+    .bind(rid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if decision == "approved" {
+        sqlx::query("UPDATE missions SET status = 'completed' WHERE id = $1 AND deleted_at IS NULL")
+            .bind(mission_id)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "REVIEW_CONCLUSION_REQUEST",
+        Some("mission_conclusion_requests"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "decision": decision })),
+    )
+    .await;
+
+    Ok(())
 }

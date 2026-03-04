@@ -82,6 +82,9 @@ pub fn run() {
             commands::astronaut_commands::rename_sector,
             commands::astronaut_commands::get_ships,
             commands::astronaut_commands::get_astronaut_stats,
+            commands::astronaut_commands::submit_conclusion_request,
+            commands::astronaut_commands::get_conclusion_requests,
+            commands::astronaut_commands::review_conclusion_request,
             // settlement
             commands::settlement_commands::get_settlements,
             commands::settlement_commands::get_settler_tasks,
@@ -180,6 +183,11 @@ pub fn run() {
             commands::admin_commands::terminate_personnel,
             commands::admin_commands::get_audit_log,
             commands::admin_commands::override_vote,
+            // research tasks
+            commands::research_task_commands::assign_research_task,
+            commands::research_task_commands::get_research_tasks,
+            commands::research_task_commands::submit_research_task_result,
+            commands::research_task_commands::complete_research_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
