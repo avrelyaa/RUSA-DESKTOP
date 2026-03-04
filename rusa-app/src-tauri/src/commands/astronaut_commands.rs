@@ -389,6 +389,10 @@ pub async fn submit_conclusion_request(
         return Err("Only astronauts can submit conclusion requests".to_string());
     }
 
+    let summary = report_summary
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| "Report summary is required".to_string())?;
+
     ensure_conclusion_requests_table().await?;
 
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
@@ -398,7 +402,7 @@ pub async fn submit_conclusion_request(
     )
     .bind(mid)
     .bind(session.user_id)
-    .bind(&report_summary)
+    .bind(&summary)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
