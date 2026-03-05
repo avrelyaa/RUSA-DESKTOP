@@ -1,8 +1,10 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   let {
     columns = [] as { key: string; label: string; width?: string }[],
     rows = [] as any[],
-    onRowClick = undefined as ((row: any) => void) | undefined
+    onRowClick = undefined as ((row: any) => void) | undefined,
+    rowActions = undefined as Snippet<[any]> | undefined,
   } = $props();
 </script>
 
@@ -13,12 +15,13 @@
         {#each columns as col}
           <th style={col.width ? `width: ${col.width}` : ''}>{col.label}</th>
         {/each}
+        {#if rowActions}<th></th>{/if}
       </tr>
     </thead>
     <tbody>
       {#if rows.length === 0}
         <tr>
-          <td colspan={columns.length} class="empty-state">No records found.</td>
+          <td colspan={rowActions ? columns.length + 1 : columns.length} class="empty-state">No records found.</td>
         </tr>
       {:else}
         {#each rows as row}
@@ -26,6 +29,7 @@
             {#each columns as col}
               <td>{row[col.key] ?? '—'}</td>
             {/each}
+            {#if rowActions}<td class="actions-cell">{@render rowActions(row)}</td>{/if}
           </tr>
         {/each}
       {/if}
@@ -47,4 +51,5 @@
   tr:hover td { background: rgba(61,127,255,0.04); }
   tr.clickable { cursor: pointer; }
   .empty-state { text-align: center; color: #4a5d82; padding: 2rem; }
+  .actions-cell { white-space: nowrap; text-align: right; }
 </style>

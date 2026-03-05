@@ -8,13 +8,14 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'missions' | 'journals' | 'sectors';
+  type Tab = 'missions' | 'journals' | 'sectors' | 'conclusion_requests';
   let activeTab = $state<Tab>('missions');
 
   let missions: any[] = $state([]);
   let journals: any[] = $state([]);
   let sectors: any[] = $state([]);
   let ships: any[] = $state([]);
+  let conclusionRequests: any[] = $state([]);
   let loading = $state(false);
 
   // Mission form
@@ -37,15 +38,31 @@
   let secName = $state('');
   let secDesc = $state('');
 
+  // Conclusion request form (astronaut)
+  let conclusionOpen = $state(false);
+  let cMissionId = $state('');
+  let cSummary = $state('');
+
+  // Review form (wanderer/taskmaster)
+  let reviewOpen = $state(false);
+  let reviewRequestId = $state('');
+  let reviewDecision = $state('approved');
+  let reviewNotes = $state('');
+
+  const isDirector = $derived(
+    $session?.role_name === 'the_wanderer' || $session?.role_name === 'the_taskmaster'
+  );
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [missions, journals, sectors, ships] = await Promise.all([
+      [missions, journals, sectors, ships, conclusionRequests] = await Promise.all([
         astronautApi.getMissions(s.token),
         astronautApi.getJournals(s.token),
         astronautApi.getSectors(s.token),
         astronautApi.getShips(s.token),
+        astronautApi.getConclusionRequests(s.token),
       ]);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
@@ -84,6 +101,34 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitConclusionRequest() {
+    const s = $session; if (!s) return;
+    if (!cMissionId || !cSummary) { showToast('Mission ID and report summary required', 'error'); return; }
+    try {
+      await astronautApi.submitConclusionRequest(s.token, cMissionId, cSummary);
+      showToast('Conclusion request submitted', 'success');
+      conclusionOpen = false; cMissionId = ''; cSummary = '';
+      conclusionRequests = await astronautApi.getConclusionRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openReview(requestId: string) {
+    reviewRequestId = requestId;
+    reviewDecision = 'approved';
+    reviewNotes = '';
+    reviewOpen = true;
+  }
+
+  async function submitReview() {
+    const s = $session; if (!s) return;
+    try {
+      await astronautApi.reviewConclusionRequest(s.token, reviewRequestId, reviewDecision, reviewNotes || undefined);
+      showToast('Review submitted', 'success');
+      reviewOpen = false;
+      conclusionRequests = await astronautApi.getConclusionRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   const missionCols = [
     { key: 'title', label: 'Mission' },
     { key: 'mission_type', label: 'Type' },
@@ -99,6 +144,12 @@
     { key: 'name', label: 'Sector Name' },
     { key: 'description', label: 'Description' },
   ];
+  const conclusionCols = [
+    { key: 'mission_id', label: 'Mission ID' },
+    { key: 'report_summary', label: 'Report Summary' },
+    { key: 'status', label: 'Status' },
+    { key: 'created_at', label: 'Submitted' },
+  ];
 </script>
 
 <svelte:head><title>RUSA IMS — Astronautics</title></svelte:head>
@@ -108,6 +159,7 @@
     <button class="tab" class:active={activeTab==='missions'} onclick={() => activeTab='missions'}>Missions</button>
     <button class="tab" class:active={activeTab==='journals'} onclick={() => activeTab='journals'}>Journals</button>
     <button class="tab" class:active={activeTab==='sectors'} onclick={() => activeTab='sectors'}>Sectors</button>
+    <button class="tab" class:active={activeTab==='conclusion_requests'} onclick={() => activeTab='conclusion_requests'}>Conclusion Requests</button>
   </div>
 
   {#if loading}
@@ -130,6 +182,20 @@
       <button class="btn-primary" onclick={() => sectorOpen = true}>+ Create Sector</button>
     </div>
     <Table columns={sectorCols} rows={sectors} />
+  {:else if activeTab === 'conclusion_requests'}
+    <div class="section-bar">
+      <h2 class="section-title">Conclusion Requests</h2>
+      {#if !isDirector}
+        <button class="btn-primary" onclick={() => conclusionOpen = true}>+ Request Conclusion</button>
+      {/if}
+    </div>
+    <Table columns={conclusionCols} rows={conclusionRequests}>
+      {#snippet rowActions(row)}
+        {#if isDirector && row.status === 'pending'}
+          <button class="btn-action" onclick={() => openReview(row.id)}>Review</button>
+        {/if}
+      {/snippet}
+    </Table>
   {/if}
 </PageShell>
 
@@ -170,6 +236,28 @@
   </div>
 </Modal>
 
+<Modal bind:open={conclusionOpen} title="Request Mission Conclusion">
+  <div class="form">
+    <Field label="Mission ID" bind:value={cMissionId} required />
+    <Field label="Report Summary" type="textarea" bind:value={cSummary} rows={5} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => conclusionOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitConclusionRequest}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={reviewOpen} title="Review Conclusion Request">
+  <div class="form">
+    <Field label="Decision" type="select" bind:value={reviewDecision} options={[{value:'approved',label:'Approve'},{value:'rejected',label:'Reject'}]} />
+    <Field label="Review Notes" type="textarea" bind:value={reviewNotes} rows={4} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitReview}>Submit Review</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -181,4 +269,6 @@
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .btn-action { background: none; border: 1px solid #3d7fff; border-radius: 4px; color: #3d7fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.06em; padding: 0.25rem 0.75rem; }
+  .btn-action:hover { background: #3d7fff22; }
 </style>
