@@ -1,69 +1,7 @@
 use crate::auth::{require_role, require_role_name, validate_session_command};
-use crate::db;
 use crate::queries::auth::write_audit_log;
+use crate::queries::governance as governance_queries;
 use uuid::Uuid;
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct VoteRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    status: Option<String>,
-    initiated_by: Option<Uuid>,
-    interrupted_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-    deadline: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct VoteDetailRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    status: Option<String>,
-    initiated_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-    deadline: Option<chrono::DateTime<chrono::Utc>>,
-    yes_count: Option<i64>,
-    no_count: Option<i64>,
-    abstain_count: Option<i64>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct MeetingRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
-    location: Option<String>,
-    created_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct RelocationRow {
-    id: Uuid,
-    staff_id: Option<Uuid>,
-    to_location: String,
-    relocation_type: Option<String>,
-    start_date: Option<chrono::DateTime<chrono::Utc>>,
-    end_date: Option<chrono::DateTime<chrono::Utc>>,
-    reason: Option<String>,
-    requested_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct EventDocumentRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    event_date: Option<chrono::DateTime<chrono::Utc>>,
-    venue: Option<String>,
-    venue_invoice: Option<String>,
-    logged_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
 
 #[tauri::command]
 pub async fn initiate_vote(
@@ -74,16 +12,12 @@ pub async fn initiate_vote(
     let session = validate_session_command(&token).await?;
     require_role(&session, 3)?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes') RETURNING id"
-    )
-    .bind(&title).bind(&description).bind(session.user_id)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = governance_queries::insert_vote(&title, description.as_deref(), session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "INITIATE_VOTE", Some("votes"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "INITIATE_VOTE", Some("votes"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -101,13 +35,9 @@ pub async fn cast_vote(
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
     // Check that the vote is still open and within the 15-minute window
-    let vote_check: Option<(String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
-        "SELECT status, deadline FROM votes WHERE id = $1 AND deleted_at IS NULL"
-    )
-    .bind(vid)
-    .fetch_optional(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let vote_check = governance_queries::check_vote_status(vid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     let (vstatus, vdeadline) = vote_check.ok_or_else(|| "Vote not found".to_string())?;
     if vstatus != "open" {
@@ -120,15 +50,9 @@ pub async fn cast_vote(
     }
 
     // Upsert: allow switching within the time window
-    sqlx::query(
-        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, voted_at = NOW()"#
-    )
-    .bind(vid).bind(session.user_id).bind(&decision)
-    .execute(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    governance_queries::upsert_vote_ballot(vid, session.user_id, &decision)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision }))).await;
     Ok(())
@@ -139,25 +63,11 @@ pub async fn get_votes(token: String) -> Result<Vec<serde_json::Value>, String> 
     let _session = validate_session_command(&token).await?;
 
     // Lazily resolve expired votes
-    sqlx::query(
-        r#"UPDATE votes SET status = CASE
-            WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
-                 (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'no')
-            THEN 'passed'
-            ELSE 'failed'
-        END
-        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()"#
-    )
-    .execute(db::get_db())
-    .await
-    .ok(); // best-effort, don't fail on error
+    governance_queries::resolve_expired_votes().await.ok(); // best-effort, don't fail on error
 
-    let rows = sqlx::query_as::<_, VoteRow>(
-        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at, deadline FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = governance_queries::get_all_votes()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -170,18 +80,10 @@ pub async fn get_vote_details(
     let _session = validate_session_command(&token).await?;
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
-    let row = sqlx::query_as::<_, VoteDetailRow>(
-        r#"SELECT v.id, v.title, v.description, v.status, v.initiated_by, v.created_at, v.deadline,
-                  (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'yes') as yes_count,
-                  (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'no') as no_count,
-                  (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = v.id AND decision = 'abstain') as abstain_count
-           FROM votes v WHERE v.id = $1"#
-    )
-    .bind(vid)
-    .fetch_optional(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?
-    .ok_or_else(|| "Vote not found".to_string())?;
+    let row = governance_queries::get_vote_details(vid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Vote not found".to_string())?;
 
     Ok(serde_json::to_value(row).unwrap_or_default())
 }
@@ -193,9 +95,7 @@ pub async fn interrupt_vote(token: String, vote_id: String) -> Result<(), String
 
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
-    sqlx::query("UPDATE votes SET status = 'interrupted', interrupted_by = $1 WHERE id = $2 AND status = 'open'")
-        .bind(session.user_id).bind(vid)
-        .execute(db::get_db())
+    governance_queries::interrupt_vote(vid, session.user_id)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -219,22 +119,19 @@ pub async fn create_meeting(
         .map(|d| d.with_timezone(&chrono::Utc))
         .map_err(|_| "Invalid scheduled_at format".to_string())?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO meetings (title, description, scheduled_at, location, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
+    let meeting_id = governance_queries::insert_meeting(
+        &title,
+        description.as_deref(),
+        sched,
+        location.as_deref(),
+        session.user_id,
     )
-    .bind(&title).bind(&description).bind(sched).bind(&location).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let meeting_id = row.0;
-
     for aid_str in &attendee_ids {
         if let Ok(aid) = Uuid::parse_str(aid_str) {
-            let _ = sqlx::query("INSERT INTO meeting_attendees (meeting_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING")
-                .bind(meeting_id).bind(aid)
-                .execute(db::get_db())
-                .await;
+            let _ = governance_queries::insert_meeting_attendee(meeting_id, aid).await;
         }
     }
 
@@ -246,12 +143,9 @@ pub async fn create_meeting(
 pub async fn get_meetings(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, MeetingRow>(
-        "SELECT id, title, description, scheduled_at, location, created_by, created_at FROM meetings WHERE deleted_at IS NULL ORDER BY scheduled_at DESC"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = governance_queries::get_all_meetings()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -279,28 +173,29 @@ pub async fn relocate_staff(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&chrono::Utc));
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO staff_relocations (staff_id, to_location, relocation_type, start_date, end_date, reason, requested_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id"
+    let id = governance_queries::insert_staff_relocation(
+        sid,
+        &to_location,
+        &relocation_type,
+        sdate,
+        edate,
+        reason.as_deref(),
+        session.user_id,
     )
-    .bind(sid).bind(&to_location).bind(&relocation_type).bind(sdate).bind(edate).bind(&reason).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "RELOCATE_STAFF", Some("staff_relocations"), Some(row.0), None, Some(serde_json::json!({ "staff_id": staff_id, "to_location": to_location }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "RELOCATE_STAFF", Some("staff_relocations"), Some(id), None, Some(serde_json::json!({ "staff_id": staff_id, "to_location": to_location }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
 pub async fn get_relocations(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, RelocationRow>(
-        "SELECT id, staff_id, to_location, relocation_type, start_date, end_date, reason, requested_by, created_at FROM staff_relocations ORDER BY created_at DESC"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = governance_queries::get_all_relocations()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -317,9 +212,7 @@ pub async fn set_archive_permission(
 
     let rid = Uuid::parse_str(&record_id).map_err(|_| "Invalid record ID".to_string())?;
 
-    sqlx::query("INSERT INTO archive_permissions (table_name, record_id, access_level, set_by) VALUES ($1,$2,$3,$4) ON CONFLICT (table_name, record_id) DO UPDATE SET access_level = $3, set_by = $4")
-        .bind(&table_name).bind(rid).bind(&access_level).bind(session.user_id)
-        .execute(db::get_db())
+    governance_queries::upsert_archive_permission(&table_name, rid, &access_level, session.user_id)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -344,28 +237,28 @@ pub async fn log_event_document(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&chrono::Utc));
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO event_documents (title, description, event_date, venue, venue_invoice, logged_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+    let id = governance_queries::insert_event_document(
+        &title,
+        description.as_deref(),
+        edate,
+        venue.as_deref(),
+        venue_invoice.as_deref(),
+        session.user_id,
     )
-    .bind(&title).bind(&description).bind(edate).bind(&venue).bind(&venue_invoice).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "LOG_EVENT_DOCUMENT", Some("event_documents"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "LOG_EVENT_DOCUMENT", Some("event_documents"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
 pub async fn get_event_documents(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, EventDocumentRow>(
-        "SELECT id, title, description, event_date, venue, venue_invoice, logged_by, created_at FROM event_documents WHERE deleted_at IS NULL ORDER BY event_date DESC"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = governance_queries::get_all_event_documents()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }

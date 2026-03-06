@@ -1,77 +1,8 @@
 use crate::auth::{require_role_name, validate_session_command};
-use crate::db;
 use crate::queries::auth::write_audit_log;
+use crate::queries::budget as budget_queries;
+use crate::queries::medical as medical_queries;
 use uuid::Uuid;
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct ShiftRow {
-    id: Uuid,
-    staff_id: Option<Uuid>,
-    shift_start: Option<chrono::DateTime<chrono::Utc>>,
-    shift_end: Option<chrono::DateTime<chrono::Utc>>,
-    notes: Option<String>,
-    allocated_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct MedicalInventoryRow {
-    id: Uuid,
-    item_name: String,
-    category: Option<String>,
-    quantity: Option<i32>,
-    unit: Option<String>,
-    expiry_date: Option<chrono::DateTime<chrono::Utc>>,
-    updated_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct PatientRecordRow {
-    id: Uuid,
-    patient_id: Option<Uuid>,
-    diagnosis: Option<String>,
-    treatment: Option<String>,
-    medications: Option<String>,
-    notes: Option<String>,
-    treated_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct SpecializationRow {
-    id: Uuid,
-    staff_id: Option<Uuid>,
-    specialization: String,
-    certified_at: Option<chrono::NaiveDate>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct BudgetRequestRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    amount: Option<f64>,
-    items: Option<String>,
-    status: Option<String>,
-    requested_by: Option<Uuid>,
-    accountant_notes: Option<String>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct ExpenditureReportRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    total_amount: Option<f64>,
-    items: Option<String>,
-    invoice_data: Option<String>,
-    status: Option<String>,
-    reported_by: Option<Uuid>,
-    is_flagged: Option<bool>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
 
 #[tauri::command]
 pub async fn allocate_shift(
@@ -92,16 +23,12 @@ pub async fn allocate_shift(
         .map(|d| d.with_timezone(&chrono::Utc))
         .map_err(|_| "Invalid shift_end format".to_string())?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO medical_shifts (staff_id, shift_start, shift_end, notes, allocated_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
-    )
-    .bind(sid).bind(sstart).bind(send).bind(&notes).bind(session.user_id)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = medical_queries::insert_medical_shift(sid, sstart, send, notes.as_deref(), session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "ALLOCATE_SHIFT", Some("medical_shifts"), Some(row.0), None, Some(serde_json::json!({ "staff_id": staff_id }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "ALLOCATE_SHIFT", Some("medical_shifts"), Some(id), None, Some(serde_json::json!({ "staff_id": staff_id }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -109,14 +36,11 @@ pub async fn get_shifts(token: String) -> Result<Vec<serde_json::Value>, String>
     let session = validate_session_command(&token).await?;
 
     let rows = if session.role_name == "head_of_medicine" {
-        sqlx::query_as::<_, ShiftRow>(
-            "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM medical_shifts ORDER BY shift_start DESC"
-        ).fetch_all(db::get_db()).await
+        medical_queries::get_all_medical_shifts().await
     } else {
-        sqlx::query_as::<_, ShiftRow>(
-            "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM medical_shifts WHERE staff_id = $1 ORDER BY shift_start DESC"
-        ).bind(session.user_id).fetch_all(db::get_db()).await
-    }.map_err(|e| format!("DB error: {}", e))?;
+        medical_queries::get_user_medical_shifts(session.user_id).await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -125,12 +49,9 @@ pub async fn get_shifts(token: String) -> Result<Vec<serde_json::Value>, String>
 pub async fn get_medical_inventory(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, MedicalInventoryRow>(
-        "SELECT id, item_name, category, quantity, unit, expiry_date, updated_at FROM medical_inventory WHERE deleted_at IS NULL ORDER BY item_name"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = medical_queries::get_all_medical_inventory()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -149,16 +70,19 @@ pub async fn update_medical_inventory(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&chrono::Utc));
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO medical_inventory (item_name, category, quantity, unit, expiry_date, updated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+    let id = medical_queries::insert_medical_inventory(
+        &item_name,
+        category.as_deref(),
+        quantity,
+        unit.as_deref(),
+        edate,
+        session.user_id,
     )
-    .bind(&item_name).bind(&category).bind(quantity).bind(&unit).bind(edate).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "UPDATE_MEDICAL_INVENTORY", Some("medical_inventory"), Some(row.0), None, Some(serde_json::json!({ "item_name": item_name, "quantity": quantity }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "UPDATE_MEDICAL_INVENTORY", Some("medical_inventory"), Some(id), None, Some(serde_json::json!({ "item_name": item_name, "quantity": quantity }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -173,16 +97,19 @@ pub async fn create_patient_record(
     let session = validate_session_command(&token).await?;
     let pid = Uuid::parse_str(&patient_id).map_err(|_| "Invalid patient ID".to_string())?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO patient_records (patient_id, diagnosis, treatment, medications, notes, treated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
+    let id = medical_queries::insert_patient_record(
+        pid,
+        diagnosis.as_deref(),
+        treatment.as_deref(),
+        medications.as_deref(),
+        notes.as_deref(),
+        session.user_id,
     )
-    .bind(pid).bind(&diagnosis).bind(&treatment).bind(&medications).bind(&notes).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_PATIENT_RECORD", Some("patient_records"), Some(row.0), None, None).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "CREATE_PATIENT_RECORD", Some("patient_records"), Some(id), None, None).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -198,13 +125,9 @@ pub async fn get_patient_records(
 
     let pid = Uuid::parse_str(&patient_id).map_err(|_| "Invalid patient ID".to_string())?;
 
-    let rows = sqlx::query_as::<_, PatientRecordRow>(
-        "SELECT id, patient_id, diagnosis, treatment, medications, notes, treated_by, created_at FROM patient_records WHERE patient_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
-    )
-    .bind(pid)
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = medical_queries::get_patient_records(pid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -221,28 +144,21 @@ pub async fn add_specialization(
     let cdate = certified_at.as_deref()
         .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO staff_specializations (staff_id, specialization, certified_at) VALUES ($1,$2,$3) RETURNING id"
-    )
-    .bind(sid).bind(&specialization).bind(cdate)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = medical_queries::insert_staff_specialization(sid, &specialization, cdate)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "ADD_SPECIALIZATION", Some("staff_specializations"), Some(row.0), None, Some(serde_json::json!({ "staff_id": staff_id, "specialization": specialization }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "ADD_SPECIALIZATION", Some("staff_specializations"), Some(id), None, Some(serde_json::json!({ "staff_id": staff_id, "specialization": specialization }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
 pub async fn get_staff_specializations(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, SpecializationRow>(
-        "SELECT id, staff_id, specialization, certified_at, created_at FROM staff_specializations ORDER BY specialization"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = medical_queries::get_all_staff_specializations()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -260,16 +176,18 @@ pub async fn submit_budget_request(
         return Err("Only head of medicine or sanitary can submit budget requests".to_string());
     }
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO budget_requests (title, description, amount, items, status, requested_by) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id"
+    let id = budget_queries::insert_budget_request(
+        &title,
+        &description,
+        amount,
+        items.as_deref(),
+        session.user_id,
     )
-    .bind(&title).bind(&description).bind(amount).bind(&items).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_BUDGET_REQUEST", Some("budget_requests"), Some(row.0), None, Some(serde_json::json!({ "title": title, "amount": amount }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_BUDGET_REQUEST", Some("budget_requests"), Some(id), None, Some(serde_json::json!({ "title": title, "amount": amount }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -283,14 +201,17 @@ pub async fn submit_expenditure_report(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO expenditure_reports (title, description, total_amount, items, invoice_data, status, reported_by) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id"
+    let id = budget_queries::insert_expenditure_report(
+        &title,
+        &description,
+        total_amount,
+        items.as_deref(),
+        invoice_data.as_deref(),
+        session.user_id,
     )
-    .bind(&title).bind(&description).bind(total_amount).bind(&items).bind(&invoice_data).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_EXPENDITURE_REPORT", Some("expenditure_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title, "total_amount": total_amount }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_EXPENDITURE_REPORT", Some("expenditure_reports"), Some(id), None, Some(serde_json::json!({ "title": title, "total_amount": total_amount }))).await;
+    Ok(id.to_string())
 }
