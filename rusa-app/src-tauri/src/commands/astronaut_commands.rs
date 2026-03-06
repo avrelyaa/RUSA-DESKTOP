@@ -1,106 +1,15 @@
 use crate::auth::{require_role_name, validate_session_command};
-use crate::db;
+use crate::queries::astronaut as astronaut_queries;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct MissionConclusionRequestRow {
-    id: Uuid,
-    mission_id: Uuid,
-    submitted_by: Option<Uuid>,
-    report_summary: Option<String>,
-    status: String,
-    reviewed_by: Option<Uuid>,
-    review_notes: Option<String>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-async fn ensure_conclusion_requests_table() -> Result<(), String> {
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS mission_conclusion_requests (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            mission_id UUID NOT NULL REFERENCES missions(id),
-            submitted_by UUID REFERENCES users(id),
-            report_summary TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            reviewed_by UUID REFERENCES users(id),
-            review_notes TEXT,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            deleted_at TIMESTAMPTZ
-        )"#,
-    )
-    .execute(db::get_db())
-    .await
-    .map_err(|e| format!("DB error creating table: {}", e))?;
-    Ok(())
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct MissionRow {
-    id: Uuid,
-    title: String,
-    description: Option<String>,
-    mission_type: Option<String>,
-    status: Option<String>,
-    ship_id: Option<Uuid>,
-    sector_id: Option<Uuid>,
-    planet_id: Option<Uuid>,
-    start_date: Option<chrono::DateTime<chrono::Utc>>,
-    created_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct MissionReportRow {
-    id: Uuid,
-    mission_id: Uuid,
-    report_type: Option<String>,
-    content: Option<String>,
-    submitted_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct JournalRow {
-    id: Uuid,
-    mission_id: Option<Uuid>,
-    title: String,
-    content: Option<String>,
-    is_public: Option<bool>,
-    author_id: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct SectorRow {
-    id: Uuid,
-    name: String,
-    description: Option<String>,
-    boundaries: Option<String>,
-    created_by: Option<Uuid>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-#[derive(sqlx::FromRow, serde::Serialize)]
-struct ShipRow {
-    id: Uuid,
-    name: String,
-    ship_type: Option<String>,
-    status: Option<String>,
-    capacity: Option<i32>,
-    created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
 
 #[tauri::command]
 pub async fn get_missions(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, MissionRow>(
-        "SELECT id, title, description, mission_type, status, ship_id, sector_id, planet_id, start_date, created_by, created_at FROM missions WHERE deleted_at IS NULL ORDER BY created_at DESC"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = astronaut_queries::get_all_missions()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -126,17 +35,21 @@ pub async fn create_mission(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|d| d.with_timezone(&chrono::Utc));
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO missions (title, description, mission_type, status, ship_id, sector_id, planet_id, start_date, created_by) VALUES ($1,$2,$3,'planned',$4,$5,$6,$7,$8) RETURNING id"
+    let id = astronaut_queries::insert_mission(
+        &title,
+        description.as_deref(),
+        &mission_type,
+        sid,
+        secid,
+        pid,
+        sdate,
+        session.user_id,
     )
-    .bind(&title).bind(&description).bind(&mission_type)
-    .bind(sid).bind(secid).bind(pid).bind(sdate).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_MISSION", Some("missions"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "CREATE_MISSION", Some("missions"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -156,9 +69,7 @@ pub async fn update_mission_status(
 
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
 
-    sqlx::query("UPDATE missions SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
-        .bind(&status).bind(mid)
-        .execute(db::get_db())
+    astronaut_queries::update_mission_status(mid, &status)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -179,13 +90,9 @@ pub async fn assign_crew(
 
     for aid_str in &astronaut_ids {
         let aid = Uuid::parse_str(aid_str).map_err(|_| "Invalid astronaut ID".to_string())?;
-        sqlx::query(
-            "INSERT INTO mission_crew (mission_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
-        )
-        .bind(mid).bind(aid)
-        .execute(db::get_db())
-        .await
-        .map_err(|e| format!("DB error: {}", e))?;
+        astronaut_queries::insert_mission_crew(mid, aid)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
     }
 
     let _ = write_audit_log(Some(session.user_id), "ASSIGN_CREW", Some("mission_crew"), Some(mid), None, Some(serde_json::json!({ "mission_id": mission_id, "count": astronaut_ids.len() }))).await;
@@ -202,16 +109,12 @@ pub async fn submit_mission_report(
     let session = validate_session_command(&token).await?;
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO mission_reports (mission_id, report_type, content, submitted_by) VALUES ($1,$2,$3,$4) RETURNING id"
-    )
-    .bind(mid).bind(&report_type).bind(&content).bind(session.user_id)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = astronaut_queries::insert_mission_report(mid, &report_type, &content, session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_MISSION_REPORT", Some("mission_reports"), Some(row.0), None, None).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_MISSION_REPORT", Some("mission_reports"), Some(id), None, None).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -222,13 +125,9 @@ pub async fn get_mission_reports(
     let _session = validate_session_command(&token).await?;
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
 
-    let rows = sqlx::query_as::<_, MissionReportRow>(
-        "SELECT id, mission_id, report_type, content, submitted_by, created_at FROM mission_reports WHERE mission_id = $1 ORDER BY created_at DESC"
-    )
-    .bind(mid)
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = astronaut_queries::get_mission_reports_by_mission(mid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -244,29 +143,21 @@ pub async fn create_exploration_journal(
     let session = validate_session_command(&token).await?;
     let mid = mission_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO exploration_journals (mission_id, title, content, is_public, author_id) VALUES ($1,$2,$3,$4,$5) RETURNING id"
-    )
-    .bind(mid).bind(&title).bind(&content).bind(is_public).bind(session.user_id)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = astronaut_queries::insert_journal(mid, &title, &content, is_public, session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_JOURNAL", Some("exploration_journals"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "CREATE_JOURNAL", Some("exploration_journals"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
 pub async fn get_journals(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, JournalRow>(
-        "SELECT id, mission_id, title, content, is_public, author_id, created_at FROM exploration_journals WHERE (is_public = true OR author_id = $1) AND deleted_at IS NULL ORDER BY created_at DESC"
-    )
-    .bind(session.user_id)
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = astronaut_queries::get_journals_for_user(session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -275,12 +166,9 @@ pub async fn get_journals(token: String) -> Result<Vec<serde_json::Value>, Strin
 pub async fn get_sectors(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, SectorRow>(
-        "SELECT id, name, description, boundaries, created_by, created_at FROM sectors WHERE deleted_at IS NULL ORDER BY name"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = astronaut_queries::get_all_sectors()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -295,16 +183,17 @@ pub async fn create_sector(
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "the_wanderer")?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO sectors (name, description, boundaries, created_by) VALUES ($1,$2,$3,$4) RETURNING id"
+    let id = astronaut_queries::insert_sector(
+        &name,
+        description.as_deref(),
+        boundaries.as_deref(),
+        session.user_id,
     )
-    .bind(&name).bind(&description).bind(&boundaries).bind(session.user_id)
-    .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_SECTOR", Some("sectors"), Some(row.0), None, Some(serde_json::json!({ "name": name }))).await;
-    Ok(row.0.to_string())
+    let _ = write_audit_log(Some(session.user_id), "CREATE_SECTOR", Some("sectors"), Some(id), None, Some(serde_json::json!({ "name": name }))).await;
+    Ok(id.to_string())
 }
 
 #[tauri::command]
@@ -318,9 +207,7 @@ pub async fn rename_sector(
 
     let sid = Uuid::parse_str(&sector_id).map_err(|_| "Invalid sector ID".to_string())?;
 
-    sqlx::query("UPDATE sectors SET name = $1 WHERE id = $2 AND deleted_at IS NULL")
-        .bind(&new_name).bind(sid)
-        .execute(db::get_db())
+    astronaut_queries::update_sector_name(sid, &new_name)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -332,12 +219,9 @@ pub async fn rename_sector(
 pub async fn get_ships(token: String) -> Result<Vec<serde_json::Value>, String> {
     let _session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, ShipRow>(
-        "SELECT id, name, ship_type, status, capacity, created_at FROM ships WHERE deleted_at IS NULL ORDER BY name"
-    )
-    .fetch_all(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let rows = astronaut_queries::get_all_ships()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
@@ -353,27 +237,9 @@ pub async fn get_astronaut_stats(
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or(session.user_id);
 
-    #[derive(sqlx::FromRow, serde::Serialize)]
-    struct AstronautStats {
-        total_missions: Option<i64>,
-        completed_missions: Option<i64>,
-        total_reports: Option<i64>,
-        total_journals: Option<i64>,
-    }
-
-    let stats = sqlx::query_as::<_, AstronautStats>(
-        r#"
-        SELECT
-            (SELECT COUNT(*) FROM mission_crew WHERE user_id = $1) as total_missions,
-            (SELECT COUNT(*) FROM mission_crew mc JOIN missions m ON mc.mission_id = m.id WHERE mc.user_id = $1 AND m.status = 'completed') as completed_missions,
-            (SELECT COUNT(*) FROM mission_reports WHERE submitted_by = $1) as total_reports,
-            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL) as total_journals
-        "#
-    )
-    .bind(target_id)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let stats = astronaut_queries::get_astronaut_stats(target_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(serde_json::to_value(stats).unwrap_or_default())
 }
@@ -393,55 +259,43 @@ pub async fn submit_conclusion_request(
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| "Report summary is required".to_string())?;
 
-    ensure_conclusion_requests_table().await?;
+    astronaut_queries::ensure_conclusion_requests_table()
+        .await
+        .map_err(|e| format!("DB error creating table: {}", e))?;
 
     let mid = Uuid::parse_str(&mission_id).map_err(|_| "Invalid mission ID".to_string())?;
 
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO mission_conclusion_requests (mission_id, submitted_by, report_summary, status) VALUES ($1,$2,$3,'pending') RETURNING id"
-    )
-    .bind(mid)
-    .bind(session.user_id)
-    .bind(&summary)
-    .fetch_one(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let id = astronaut_queries::insert_conclusion_request(mid, session.user_id, &summary)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     let _ = write_audit_log(
         Some(session.user_id),
         "SUBMIT_CONCLUSION_REQUEST",
         Some("mission_conclusion_requests"),
-        Some(row.0),
+        Some(id),
         None,
         Some(serde_json::json!({ "mission_id": mission_id })),
     )
     .await;
 
-    Ok(row.0.to_string())
+    Ok(id.to_string())
 }
 
 #[tauri::command]
 pub async fn get_conclusion_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    ensure_conclusion_requests_table().await?;
+    astronaut_queries::ensure_conclusion_requests_table()
+        .await
+        .map_err(|e| format!("DB error creating table: {}", e))?;
 
     let rows = if session.role_name == "the_wanderer" || session.role_name == "the_taskmaster" {
-        sqlx::query_as::<_, MissionConclusionRequestRow>(
-            "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
-        )
-        .fetch_all(db::get_db())
-        .await
-        .map_err(|e| format!("DB error: {}", e))?
+        astronaut_queries::get_all_conclusion_requests().await
     } else {
-        sqlx::query_as::<_, MissionConclusionRequestRow>(
-            "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
-        )
-        .bind(session.user_id)
-        .fetch_all(db::get_db())
-        .await
-        .map_err(|e| format!("DB error: {}", e))?
-    };
+        astronaut_queries::get_user_conclusion_requests(session.user_id).await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows
         .into_iter()
@@ -463,7 +317,9 @@ pub async fn review_conclusion_request(
         );
     }
 
-    ensure_conclusion_requests_table().await?;
+    astronaut_queries::ensure_conclusion_requests_table()
+        .await
+        .map_err(|e| format!("DB error creating table: {}", e))?;
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
@@ -471,31 +327,22 @@ pub async fn review_conclusion_request(
         return Err("Decision must be 'approved' or 'rejected'".to_string());
     }
 
-    let req: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT mission_id FROM mission_conclusion_requests WHERE id = $1 AND deleted_at IS NULL",
-    )
-    .bind(rid)
-    .fetch_optional(db::get_db())
-    .await
-    .map_err(|e| format!("DB error: {}", e))?;
+    let mission_id = astronaut_queries::get_conclusion_request_mission_id(rid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Conclusion request not found".to_string())?;
 
-    let (mission_id,) = req.ok_or_else(|| "Conclusion request not found".to_string())?;
-
-    sqlx::query(
-        "UPDATE mission_conclusion_requests SET status = $1, reviewed_by = $2, review_notes = $3 WHERE id = $4 AND deleted_at IS NULL"
+    astronaut_queries::update_conclusion_request_review(
+        rid,
+        &decision,
+        session.user_id,
+        review_notes.as_deref(),
     )
-    .bind(&decision)
-    .bind(session.user_id)
-    .bind(&review_notes)
-    .bind(rid)
-    .execute(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
     if decision == "approved" {
-        sqlx::query("UPDATE missions SET status = 'completed' WHERE id = $1 AND deleted_at IS NULL")
-            .bind(mission_id)
-            .execute(db::get_db())
+        astronaut_queries::complete_mission(mission_id)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
     }
