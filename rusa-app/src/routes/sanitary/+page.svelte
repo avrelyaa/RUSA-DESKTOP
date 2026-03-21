@@ -4,14 +4,15 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { sanitaryApi } from '$lib/api';
+  import { sanitaryApi, governanceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'tasks' | 'inventory' | 'disposal' | 'wastewater' | 'inspections';
+  type Tab = 'tasks' | 'nomad_tasks' | 'inventory' | 'disposal' | 'wastewater' | 'inspections';
   let activeTab = $state<Tab>('tasks');
 
   let tasks: any[] = $state([]);
+  let nomadTasks: any[] = $state([]);
   let inventory: any[] = $state([]);
   let disposalLogs: any[] = $state([]);
   let wastewaterLogs: any[] = $state([]);
@@ -25,6 +26,11 @@
   let tDesc = $state('');
   let tDivision = $state('');
   let tDue = $state('');
+
+  // Update nomad task status
+  let nomadTaskStatusOpen = $state(false);
+  let selectedNomadTask: any = $state(null);
+  let nomadTaskStatus = $state('pending');
 
   // Inventory form
   let invOpen = $state(false);
@@ -57,12 +63,15 @@
   let inspViolations = $state('');
   let inspRecommendations = $state('');
 
+  const isHead = $derived($session?.role_name === 'head_of_sanitary');
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, inventory, disposalLogs, wastewaterLogs, inspections] = await Promise.all([
+      [tasks, nomadTasks, inventory, disposalLogs, wastewaterLogs, inspections] = await Promise.all([
         sanitaryApi.getTasks(s.token),
+        governanceApi.getNomadTasks(s.token),
         sanitaryApi.getInventory(s.token),
         sanitaryApi.getDisposalLogs(s.token),
         sanitaryApi.getWastewaterLogs(s.token),
@@ -80,6 +89,22 @@
       showToast('Task assigned', 'success');
       taskOpen = false; tAssignee = ''; tTitle = ''; tDesc = ''; tDivision = ''; tDue = '';
       tasks = await sanitaryApi.getTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openNomadTaskStatus(task: any) {
+    selectedNomadTask = task;
+    nomadTaskStatus = task.status ?? 'pending';
+    nomadTaskStatusOpen = true;
+  }
+
+  async function updateNomadTaskStatus() {
+    const s = $session; if (!s || !selectedNomadTask) return;
+    try {
+      await governanceApi.updateNomadTaskStatus(s.token, selectedNomadTask.id, nomadTaskStatus);
+      showToast('Task status updated', 'success');
+      nomadTaskStatusOpen = false;
+      nomadTasks = await governanceApi.getNomadTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -169,6 +194,9 @@
 <PageShell title="Sanitary & Waste Management" subtitle="Tasks, inventory, disposal logs, wastewater, and inspections">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
+    {#if isHead}
+      <button class="tab" class:active={activeTab==='nomad_tasks'} onclick={() => activeTab='nomad_tasks'}>My Nomad Tasks</button>
+    {/if}
     <button class="tab" class:active={activeTab==='inventory'} onclick={() => activeTab='inventory'}>Inventory</button>
     <button class="tab" class:active={activeTab==='disposal'} onclick={() => activeTab='disposal'}>Disposal</button>
     <button class="tab" class:active={activeTab==='wastewater'} onclick={() => activeTab='wastewater'}>Wastewater</button>
@@ -183,6 +211,38 @@
       <button class="btn-primary" onclick={() => taskOpen = true}>+ Assign Task</button>
     </div>
     <Table columns={taskCols} rows={tasks} />
+  {:else if activeTab === 'nomad_tasks'}
+    <div class="section-bar">
+      <h2 class="section-title">Tasks Assigned by The Nomad</h2>
+    </div>
+    {#if nomadTasks.length === 0}
+      <p class="empty">No tasks have been assigned to you by The Nomad.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Due Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each nomadTasks as task}
+              <tr>
+                <td>{task.title}</td>
+                <td><span class="badge {task.status === 'completed' ? 'badge-done' : task.status === 'in_progress' ? 'badge-progress' : 'badge-open'}">{task.status ?? '—'}</span></td>
+                <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                <td>
+                  <button class="btn-small" onclick={() => openNomadTaskStatus(task)}>Update Status</button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {:else if activeTab === 'inventory'}
     <div class="section-bar">
       <h2 class="section-title">Sanitary Inventory</h2>
@@ -220,6 +280,22 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => taskOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={assignTask}>Assign</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={nomadTaskStatusOpen} title="Update Nomad Task Status">
+  <div class="form">
+    <p class="info-text">Task: <strong>{selectedNomadTask?.title}</strong></p>
+    <Field label="Status" type="select" bind:value={nomadTaskStatus} options={[
+      { value: 'pending', label: 'Pending' },
+      { value: 'in_progress', label: 'In Progress' },
+      { value: 'completed', label: 'Completed' },
+      { value: 'cancelled', label: 'Cancelled' },
+    ]} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => nomadTaskStatusOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={updateNomadTaskStatus}>Update</button>
     </div>
   </div>
 </Modal>
