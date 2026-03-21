@@ -1,6 +1,7 @@
 use crate::auth::{require_role, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
+use chrono::Timelike;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -105,7 +106,12 @@ pub async fn assign_settler_task(
     settlement_id: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "settler_commander")?;
+    if session.role_name != "settler_commander"
+        && session.role_name != "the_nomad"
+        && session.role_name != "the_administrator"
+    {
+        return Err("Only settler_commander, the_nomad, or the_administrator can assign settler tasks".to_string());
+    }
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
@@ -215,7 +221,8 @@ pub async fn submit_anomaly_report(
     severity: String,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "settler_commander")?;
+    // Any authenticated settler-domain user can report an anomaly to the commander.
+    // Commander-level or above required to escalate to directors separately.
 
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
@@ -229,6 +236,60 @@ pub async fn submit_anomaly_report(
 
     let _ = write_audit_log(Some(session.user_id), "SUBMIT_ANOMALY_REPORT", Some("anomaly_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title, "severity": severity }))).await;
     Ok(row.0.to_string())
+}
+
+/// Settler Commander escalates a critical anomaly to the Directors by triggering a vote.
+#[tauri::command]
+pub async fn escalate_anomaly_to_directors(
+    token: String,
+    anomaly_report_id: String,
+    reason: String,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "settler_commander" && session.role_name != "the_administrator" {
+        return Err("Only settler_commander or administrator can escalate to directors".to_string());
+    }
+
+    let arid = Uuid::parse_str(&anomaly_report_id).map_err(|_| "Invalid anomaly report ID".to_string())?;
+
+    // Fetch the anomaly to get its title
+    let anomaly: Option<(String,)> = sqlx::query_as(
+        "SELECT title FROM anomaly_reports WHERE id = $1 AND deleted_at IS NULL"
+    )
+    .bind(arid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let anomaly_title = anomaly.map(|(t,)| t).unwrap_or_else(|| "Unknown Anomaly".to_string());
+    let vote_title = format!("Abandon Settlement — {}", anomaly_title);
+    let description = format!("Critical anomaly escalation. Reason: {}", reason);
+
+    // Create the director vote
+    let now = chrono::Utc::now();
+    let scheduled_session = if now.hour() < 15 { "morning" } else { "evening" };
+
+    let vote_id: (Uuid,) = sqlx::query_as(
+        "INSERT INTO votes (title, description, status, initiated_by, deadline, scheduled_session, source_table, source_record_id) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes', $4, 'anomaly_reports', $5) RETURNING id"
+    )
+    .bind(&vote_title)
+    .bind(&description)
+    .bind(session.user_id)
+    .bind(scheduled_session)
+    .bind(arid)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    // Mark the anomaly report as escalated
+    sqlx::query("UPDATE anomaly_reports SET status = 'escalated_to_directors' WHERE id = $1")
+        .bind(arid)
+        .execute(db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "ESCALATE_ANOMALY_TO_DIRECTORS", Some("anomaly_reports"), Some(arid), None, Some(serde_json::json!({ "vote_id": vote_id.0.to_string() }))).await;
+    Ok(vote_id.0.to_string())
 }
 
 #[tauri::command]

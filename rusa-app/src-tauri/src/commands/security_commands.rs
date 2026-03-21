@@ -201,3 +201,130 @@ pub async fn get_security_findings(token: String) -> Result<Vec<serde_json::Valu
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
+
+// ──────────────── Security Tasks (Guardian) ──────────────────────
+
+use crate::db;
+
+async fn ensure_security_tasks_table() -> Result<(), String> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS security_tasks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to UUID REFERENCES users(id),
+            assigned_by UUID REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','in_progress','result_submitted','completed','cancelled')),
+            result_notes TEXT,
+            priority VARCHAR(50) DEFAULT 'medium' CHECK (priority IN ('low','medium','high','critical')),
+            due_date TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )"#,
+    )
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error creating table: {}", e))?;
+    Ok(())
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct SecurityTaskRow {
+    id: Uuid,
+    title: String,
+    description: Option<String>,
+    assigned_to: Option<Uuid>,
+    assigned_by: Option<Uuid>,
+    status: String,
+    result_notes: Option<String>,
+    priority: Option<String>,
+    due_date: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[tauri::command]
+pub async fn assign_security_task(
+    token: String,
+    assigned_to: String,
+    title: String,
+    description: Option<String>,
+    priority: Option<String>,
+    due_date: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "the_guardian" && session.role_name != "the_administrator" {
+        return Err("Only the_guardian or the_administrator can assign security tasks".to_string());
+    }
+
+    ensure_security_tasks_table().await?;
+
+    let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
+    let prio = priority.as_deref().unwrap_or("medium");
+    let ddate = due_date.as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc));
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO security_tasks (title, description, assigned_to, assigned_by, status, priority, due_date) VALUES ($1,$2,$3,$4,'pending',$5,$6) RETURNING id"
+    )
+    .bind(&title).bind(&description).bind(atid).bind(session.user_id).bind(prio).bind(ddate)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "ASSIGN_SECURITY_TASK", Some("security_tasks"), Some(row.0), None, Some(serde_json::json!({ "title": title, "assigned_to": assigned_to }))).await;
+    Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_security_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    ensure_security_tasks_table().await?;
+
+    let rows = if session.role_name == "the_guardian" || session.role_name == "the_administrator" {
+        sqlx::query_as::<_, SecurityTaskRow>(
+            "SELECT id, title, description, assigned_to, assigned_by, status, result_notes, priority, due_date, created_at FROM security_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetch_all(db::get_db()).await
+    } else {
+        sqlx::query_as::<_, SecurityTaskRow>(
+            "SELECT id, title, description, assigned_to, assigned_by, status, result_notes, priority, due_date, created_at FROM security_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        ).bind(session.user_id).fetch_all(db::get_db()).await
+    }.map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn update_security_task(
+    token: String,
+    task_id: String,
+    status: String,
+    result_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    ensure_security_tasks_table().await?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    if session.role_name == "the_guardian" || session.role_name == "the_administrator" {
+        // Guardian can complete tasks (stage 2 approval)
+        sqlx::query("UPDATE security_tasks SET status = $1, result_notes = COALESCE($2, result_notes) WHERE id = $3 AND deleted_at IS NULL")
+            .bind(&status).bind(&result_notes).bind(tid)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+    } else {
+        // Security team members can submit results for their own assigned tasks
+        sqlx::query("UPDATE security_tasks SET status = $1, result_notes = COALESCE($2, result_notes) WHERE id = $3 AND assigned_to = $4 AND deleted_at IS NULL")
+            .bind(&status).bind(&result_notes).bind(tid).bind(session.user_id)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+    }
+
+    let _ = write_audit_log(Some(session.user_id), "UPDATE_SECURITY_TASK", Some("security_tasks"), Some(tid), None, Some(serde_json::json!({ "status": status }))).await;
+    Ok(())
+}

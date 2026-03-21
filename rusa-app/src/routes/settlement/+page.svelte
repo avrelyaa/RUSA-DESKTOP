@@ -4,7 +4,7 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { settlementApi } from '$lib/api';
+  import { settlementApi, settlementEscalationApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
@@ -30,11 +30,16 @@
   let sDesc = $state('');
   let sItems = $state('');
 
-  // Anomaly form
+  // Anomaly form — any settler can submit
   let anomalyOpen = $state(false);
   let aTitle = $state('');
   let aDesc = $state('');
   let aSeverity = $state('');
+
+  // Escalation to vote (commander only)
+  let escalateOpen = $state(false);
+  let escalateAnomalyId = $state('');
+  let escalateReason = $state('');
 
   // Farm report form
   let farmOpen = $state(false);
@@ -42,6 +47,10 @@
   let fContent = $state('');
   let fCropStatus = $state('');
   let fHealthNotes = $state('');
+
+  const isCommander = $derived($session?.role_name === 'settler_commander');
+  const isNomadOrAdmin = $derived($session?.role_name === 'the_nomad' || $session?.role_name === 'the_administrator');
+  const canAssignTasks = $derived(isCommander || isNomadOrAdmin);
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -85,6 +94,19 @@
       await settlementApi.submitAnomalyReport(s.token, undefined, aTitle, aDesc || undefined, aSeverity || undefined);
       showToast('Anomaly reported', 'success');
       anomalyOpen = false; aTitle = ''; aDesc = ''; aSeverity = '';
+      anomalies = await settlementApi.getAnomalyReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function escalateAnomaly() {
+    const s = $session; if (!s) return;
+    if (!escalateAnomalyId) { showToast('Anomaly report ID required', 'error'); return; }
+    if (!escalateReason.trim()) { showToast('Reason for escalation is required', 'error'); return; }
+    try {
+      const voteId = await settlementEscalationApi.escalate(s.token, escalateAnomalyId, escalateReason);
+      showToast(`Anomaly escalated to Directors. Vote ID: ${voteId}`, 'success');
+      escalateOpen = false; escalateAnomalyId = ''; escalateReason = '';
+      anomalies = await settlementApi.getAnomalyReports(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -130,7 +152,9 @@
   {:else if activeTab === 'tasks'}
     <div class="section-bar">
       <h2 class="section-title">Settler Tasks</h2>
-      <button class="btn-primary" onclick={() => taskOpen = true}>+ Assign Task</button>
+      {#if canAssignTasks}
+        <button class="btn-primary" onclick={() => taskOpen = true}>+ Assign Task</button>
+      {/if}
     </div>
     <Table columns={taskCols} rows={tasks} />
   {:else if activeTab === 'supply'}
@@ -142,8 +166,14 @@
   {:else if activeTab === 'anomalies'}
     <div class="section-bar">
       <h2 class="section-title">Anomaly Reports</h2>
-      <button class="btn-primary" onclick={() => anomalyOpen = true}>+ Report Anomaly</button>
+      <div class="btn-group">
+        <button class="btn-primary" onclick={() => anomalyOpen = true}>+ Report Anomaly</button>
+        {#if isCommander}
+          <button class="btn-danger-outline" onclick={() => escalateOpen = true}>⚠ Escalate to Directors</button>
+        {/if}
+      </div>
     </div>
+    <p class="hint">Any settler can report an anomaly. If the Commander determines it is critical, they can escalate the report to the Directors, triggering the Director Voting Protocol.</p>
     <Table columns={[{key:'title',label:'Title'},{key:'severity',label:'Severity'},{key:'status',label:'Status'}]} rows={anomalies} />
   {:else if activeTab === 'farm_reports'}
     <div class="section-bar">
@@ -183,12 +213,25 @@
 
 <Modal bind:open={anomalyOpen} title="Report Anomaly">
   <div class="form">
+    <p class="hint">Any settler can submit an anomaly report. Reports are forwarded to the Settler Commander, who may escalate critical ones to the Directors.</p>
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
     <Field label="Severity" type="select" bind:value={aSeverity} options={severityOpts} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => anomalyOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitAnomaly}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={escalateOpen} title="Escalate Critical Anomaly to Directors">
+  <div class="form">
+    <div class="warning-box">⚠ This will trigger the Director Voting Protocol. Use only for critical anomalies.</div>
+    <Field label="Anomaly Report ID" bind:value={escalateAnomalyId} required />
+    <Field label="Escalation Reason (required)" type="textarea" bind:value={escalateReason} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => escalateOpen = false}>Cancel</button>
+      <button class="btn-danger-outline" onclick={escalateAnomaly}>Escalate to Directors</button>
     </div>
   </div>
 </Modal>
@@ -208,6 +251,11 @@
 
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
+  .btn-group { display: flex; gap: 0.5rem; }
+  .btn-danger-outline { background: none; border: 1px solid #ff4466; border-radius: 4px; color: #ff4466; cursor: pointer; font-size: 0.82rem; padding: 0.5rem 1rem; }
+  .btn-danger-outline:hover { background: #ff446611; }
+  .hint { font-size: 0.78rem; color: #6a7f9a; margin: 0 0 0.5rem; }
+  .warning-box { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3); border-radius: 4px; color: #ff4466; font-size: 0.82rem; padding: 0.75rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
   .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
   .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }

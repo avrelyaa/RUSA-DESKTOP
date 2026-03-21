@@ -311,10 +311,9 @@ pub async fn review_conclusion_request(
     review_notes: Option<String>,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_wanderer" && session.role_name != "the_taskmaster" {
-        return Err(
-            "Only the_wanderer or the_taskmaster can review conclusion requests".to_string(),
-        );
+    // Only the Taskmaster gives the final nod
+    if session.role_name != "the_taskmaster" {
+        return Err("Only the_taskmaster can give the final approval on conclusion requests".to_string());
     }
 
     astronaut_queries::ensure_conclusion_requests_table()
@@ -354,6 +353,110 @@ pub async fn review_conclusion_request(
         Some(rid),
         None,
         Some(serde_json::json!({ "decision": decision })),
+    )
+    .await;
+
+    Ok(())
+}
+
+// ─────────────────── Planet commands (Wanderer) ──────────────────
+
+#[tauri::command]
+pub async fn get_planets(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = astronaut_queries::get_all_planets()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn create_planet(
+    token: String,
+    name: String,
+    description: Option<String>,
+    sector_id: Option<String>,
+    planet_type: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_wanderer")?;
+
+    let secid = sector_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+
+    let id = astronaut_queries::insert_planet(
+        &name,
+        description.as_deref(),
+        secid,
+        planet_type.as_deref(),
+        session.user_id,
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "CREATE_PLANET", Some("planets"), Some(id), None, Some(serde_json::json!({ "name": name }))).await;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_planet(
+    token: String,
+    planet_id: String,
+    new_name: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_wanderer")?;
+
+    let pid = Uuid::parse_str(&planet_id).map_err(|_| "Invalid planet ID".to_string())?;
+
+    astronaut_queries::update_planet_name(pid, &new_name)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "RENAME_PLANET", Some("planets"), Some(pid), None, Some(serde_json::json!({ "new_name": new_name }))).await;
+    Ok(())
+}
+
+// ─────────── Two-stage conclusion review ─────────────────────────
+
+/// Stage 1: The Wanderer reviews the conclusion request (preliminary recommendation).
+#[tauri::command]
+pub async fn wanderer_review_conclusion(
+    token: String,
+    request_id: String,
+    recommendation: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_wanderer")?;
+
+    astronaut_queries::ensure_conclusion_requests_table()
+        .await
+        .map_err(|e| format!("DB error creating table: {}", e))?;
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    if recommendation != "recommend_approve" && recommendation != "recommend_reject" {
+        return Err("Recommendation must be 'recommend_approve' or 'recommend_reject'".to_string());
+    }
+
+    astronaut_queries::update_conclusion_request_wanderer_review(
+        rid,
+        &recommendation,
+        session.user_id,
+        review_notes.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "WANDERER_REVIEW_CONCLUSION",
+        Some("mission_conclusion_requests"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "recommendation": recommendation })),
     )
     .await;
 

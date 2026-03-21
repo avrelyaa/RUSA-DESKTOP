@@ -8,7 +8,7 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'users' | 'audit' | 'directors';
+  type Tab = 'users' | 'audit' | 'directors' | 'create_account';
   let activeTab = $state<Tab>('users');
 
   let users: any[] = $state([]);
@@ -91,6 +91,29 @@
 
   let roleOptions = $derived(roles.map((r: any) => ({ value: r.name, label: r.display_name || r.name })));
 
+  // Director create account form
+  let dcaUsername = $state('');
+  let dcaEmail = $state('');
+  let dcaPassword = $state('');
+  let dcaFullName = $state('');
+  let dcaRole = $state('');
+  let dcaLocation = $state('');
+
+  async function directorCreateAccount() {
+    const s = $session; if (!s) return;
+    if (!dcaUsername || !dcaEmail || !dcaPassword || !dcaFullName || !dcaRole) {
+      showToast('All required fields must be filled', 'error'); return;
+    }
+    try {
+      await adminApi.directorCreateAccount(s.token, dcaUsername, dcaEmail, dcaPassword, dcaFullName, dcaRole, dcaLocation || undefined);
+      showToast('Staff account created', 'success');
+      dcaUsername = ''; dcaEmail = ''; dcaPassword = ''; dcaFullName = ''; dcaRole = ''; dcaLocation = '';
+      users = await userApi.getAll(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  const isDirector = $derived($session?.role_name === 'the_director' || $session?.role_name === 'the_administrator');
+
   const userCols = [
     { key: 'full_name', label: 'Name' },
     { key: 'username', label: 'Username' },
@@ -111,7 +134,12 @@
 <PageShell title="Administration" subtitle="User management, audit log, and director controls">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='users'} onclick={() => activeTab='users'}>Users</button>
-    <button class="tab" class:active={activeTab==='directors'} onclick={() => activeTab='directors'}>Create Director</button>
+    {#if $session?.role_name === 'the_administrator'}
+      <button class="tab" class:active={activeTab==='directors'} onclick={() => activeTab='directors'}>Create Director</button>
+    {/if}
+    {#if isDirector}
+      <button class="tab" class:active={activeTab==='create_account'} onclick={() => activeTab='create_account'}>Create Account</button>
+    {/if}
     <button class="tab" class:active={activeTab==='audit'} onclick={() => activeTab='audit'}>Audit Log</button>
   </div>
 
@@ -134,6 +162,20 @@
       <div style="margin-top: 1rem;"><Field label="Role" type="select" bind:value={dRole} options={roleOptions} required /></div>
       <div class="form-actions" style="margin-top: 1.5rem;">
         <button class="btn-primary" onclick={createDirector}>Create Director</button>
+      </div>
+    </div>
+  {:else if activeTab === 'create_account'}
+    <div class="director-card">
+      <h2 class="section-title" style="margin-bottom: 0.5rem;">Create Staff Account</h2>
+      <p class="hint">As a Director, you can create accounts for new personnel. This action is audited.</p>
+      <Field label="Username" bind:value={dcaUsername} required />
+      <div style="margin-top: 1rem;"><Field label="Email" type="email" bind:value={dcaEmail} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Password" type="password" bind:value={dcaPassword} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Full Name" bind:value={dcaFullName} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Role" type="select" bind:value={dcaRole} options={roleOptions} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Location (optional)" bind:value={dcaLocation} /></div>
+      <div class="form-actions" style="margin-top: 1.5rem;">
+        <button class="btn-primary" onclick={directorCreateAccount}>Create Account</button>
       </div>
     </div>
   {:else if activeTab === 'audit'}

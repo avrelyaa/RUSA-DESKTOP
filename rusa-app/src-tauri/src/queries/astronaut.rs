@@ -2,6 +2,17 @@ use crate::db::get_db;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
+pub struct PlanetRow {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub sector_id: Option<Uuid>,
+    pub planet_type: Option<String>,
+    pub created_by: Option<Uuid>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
 pub struct MissionRow {
     pub id: Uuid,
     pub title: String,
@@ -64,6 +75,9 @@ pub struct MissionConclusionRequestRow {
     pub submitted_by: Option<Uuid>,
     pub report_summary: Option<String>,
     pub status: String,
+    pub wanderer_recommendation: Option<String>,
+    pub wanderer_reviewed_by: Option<Uuid>,
+    pub wanderer_review_notes: Option<String>,
     pub reviewed_by: Option<Uuid>,
     pub review_notes: Option<String>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -268,6 +282,9 @@ pub async fn ensure_conclusion_requests_table() -> Result<(), sqlx::Error> {
             submitted_by UUID REFERENCES users(id),
             report_summary TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
+            wanderer_recommendation TEXT,
+            wanderer_reviewed_by UUID REFERENCES users(id),
+            wanderer_review_notes TEXT,
             reviewed_by UUID REFERENCES users(id),
             review_notes TEXT,
             created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -276,6 +293,13 @@ pub async fn ensure_conclusion_requests_table() -> Result<(), sqlx::Error> {
     )
     .execute(get_db())
     .await?;
+    // Ensure columns exist on already-created tables (idempotent)
+    let _ = sqlx::query("ALTER TABLE mission_conclusion_requests ADD COLUMN IF NOT EXISTS wanderer_recommendation TEXT")
+        .execute(get_db()).await;
+    let _ = sqlx::query("ALTER TABLE mission_conclusion_requests ADD COLUMN IF NOT EXISTS wanderer_reviewed_by UUID REFERENCES users(id)")
+        .execute(get_db()).await;
+    let _ = sqlx::query("ALTER TABLE mission_conclusion_requests ADD COLUMN IF NOT EXISTS wanderer_review_notes TEXT")
+        .execute(get_db()).await;
     Ok(())
 }
 
@@ -298,7 +322,7 @@ pub async fn insert_conclusion_request(
 pub async fn get_all_conclusion_requests() -> Result<Vec<MissionConclusionRequestRow>, sqlx::Error>
 {
     sqlx::query_as::<_, MissionConclusionRequestRow>(
-        "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, mission_id, submitted_by, report_summary, status, wanderer_recommendation, wanderer_reviewed_by, wanderer_review_notes, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -308,7 +332,7 @@ pub async fn get_user_conclusion_requests(
     user_id: Uuid,
 ) -> Result<Vec<MissionConclusionRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, MissionConclusionRequestRow>(
-        "SELECT id, mission_id, submitted_by, report_summary, status, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, mission_id, submitted_by, report_summary, status, wanderer_recommendation, wanderer_reviewed_by, wanderer_review_notes, reviewed_by, review_notes, created_at FROM mission_conclusion_requests WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(get_db())
@@ -325,6 +349,24 @@ pub async fn get_conclusion_request_mission_id(
     .fetch_optional(get_db())
     .await?;
     Ok(row.map(|(id,)| id))
+}
+
+pub async fn update_conclusion_request_wanderer_review(
+    request_id: Uuid,
+    recommendation: &str,
+    reviewed_by: Uuid,
+    review_notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE mission_conclusion_requests SET status = 'wanderer_reviewed', wanderer_recommendation = $1, wanderer_reviewed_by = $2, wanderer_review_notes = $3 WHERE id = $4 AND status = 'pending' AND deleted_at IS NULL",
+    )
+    .bind(recommendation)
+    .bind(reviewed_by)
+    .bind(review_notes)
+    .bind(request_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
 }
 
 pub async fn update_conclusion_request_review(
@@ -354,3 +396,43 @@ pub async fn complete_mission(mission_id: Uuid) -> Result<(), sqlx::Error> {
     .await?;
     Ok(())
 }
+
+// ───────────────────────── Planet queries ──────────────────────────
+
+pub async fn get_all_planets() -> Result<Vec<PlanetRow>, sqlx::Error> {
+    sqlx::query_as::<_, PlanetRow>(
+        "SELECT id, name, description, sector_id, planet_type, created_by, created_at FROM planets WHERE deleted_at IS NULL ORDER BY name",
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn insert_planet(
+    name: &str,
+    description: Option<&str>,
+    sector_id: Option<Uuid>,
+    planet_type: Option<&str>,
+    created_by: Uuid,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO planets (name, description, sector_id, planet_type, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+    )
+    .bind(name)
+    .bind(description)
+    .bind(sector_id)
+    .bind(planet_type)
+    .bind(created_by)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn update_planet_name(planet_id: Uuid, new_name: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE planets SET name = $1 WHERE id = $2 AND deleted_at IS NULL")
+        .bind(new_name)
+        .bind(planet_id)
+        .execute(get_db())
+        .await?;
+    Ok(())
+}
+

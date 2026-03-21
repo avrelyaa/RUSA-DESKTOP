@@ -167,7 +167,11 @@ pub fn run() {
             commands::governance_commands::get_meetings,
             commands::governance_commands::relocate_staff,
             commands::governance_commands::get_relocations,
+            commands::governance_commands::get_relocatable_locations,
             commands::governance_commands::set_archive_permission,
+            commands::governance_commands::redact_record,
+            commands::governance_commands::librarian_delete_record,
+            commands::governance_commands::get_redacted_records,
             commands::governance_commands::log_event_document,
             commands::governance_commands::get_event_documents,
             // budget
@@ -183,11 +187,23 @@ pub fn run() {
             commands::admin_commands::terminate_personnel,
             commands::admin_commands::get_audit_log,
             commands::admin_commands::override_vote,
+            commands::admin_commands::director_create_account,
             // research tasks
             commands::research_task_commands::assign_research_task,
             commands::research_task_commands::get_research_tasks,
             commands::research_task_commands::submit_research_task_result,
             commands::research_task_commands::complete_research_task,
+            // astronaut planets
+            commands::astronaut_commands::get_planets,
+            commands::astronaut_commands::create_planet,
+            commands::astronaut_commands::rename_planet,
+            commands::astronaut_commands::wanderer_review_conclusion,
+            // security tasks
+            commands::security_commands::assign_security_task,
+            commands::security_commands::get_security_tasks,
+            commands::security_commands::update_security_task,
+            // settlement escalation
+            commands::settlement_commands::escalate_anomaly_to_directors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

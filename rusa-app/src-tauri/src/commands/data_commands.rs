@@ -69,11 +69,13 @@ pub async fn review_data_request(
     Ok(())
 }
 
-// Step 2b: Data Analyst marks a request as processing (starts working on it)
+// Step 2b: Data Analyst (or Statistician) marks a request as processing (starts working on it)
 #[tauri::command]
 pub async fn start_processing(token: String, request_id: String) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "data_analyst")?;
+    if session.role_name != "data_analyst" && session.role_name != "the_statistician" {
+        return Err("Only data_analyst or the_statistician can start processing requests".to_string());
+    }
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
@@ -85,7 +87,7 @@ pub async fn start_processing(token: String, request_id: String) -> Result<(), S
     Ok(())
 }
 
-// Step 3: Data Analyst processes and submits results back to The Statistician
+// Step 3: Data Analyst (or Statistician) processes and submits results back to The Statistician
 #[tauri::command]
 pub async fn analyst_submit_response(
     token: String,
@@ -94,7 +96,9 @@ pub async fn analyst_submit_response(
     analyst_notes: Option<String>,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "data_analyst")?;
+    if session.role_name != "data_analyst" && session.role_name != "the_statistician" {
+        return Err("Only data_analyst or the_statistician can submit analysis responses".to_string());
+    }
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 

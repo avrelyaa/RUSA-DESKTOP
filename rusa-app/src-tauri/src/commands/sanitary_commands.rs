@@ -27,7 +27,12 @@ pub async fn assign_sanitary_task(
     due_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    require_role_name(&session, "head_of_sanitary")?;
+    if session.role_name != "head_of_sanitary"
+        && session.role_name != "the_nomad"
+        && session.role_name != "the_administrator"
+    {
+        return Err("Only head_of_sanitary, the_nomad, or the_administrator can assign sanitary tasks".to_string());
+    }
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let ddate = due_date.as_deref()

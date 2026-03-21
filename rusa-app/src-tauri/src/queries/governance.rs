@@ -67,13 +67,15 @@ pub async fn insert_vote(
     title: &str,
     description: Option<&str>,
     initiated_by: Uuid,
+    scheduled_session: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes') RETURNING id",
+        "INSERT INTO votes (title, description, status, initiated_by, deadline, scheduled_session) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes', $4) RETURNING id",
     )
     .bind(title)
     .bind(description)
     .bind(initiated_by)
+    .bind(scheduled_session)
     .fetch_one(get_db())
     .await?;
     Ok(row.0)
@@ -95,21 +97,34 @@ pub async fn upsert_vote_ballot(
     vote_id: Uuid,
     voter_id: Uuid,
     decision: &str,
+    reason: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, voted_at = NOW()"#,
+        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, reason, voted_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, reason = $4, voted_at = NOW()"#,
     )
     .bind(vote_id)
     .bind(voter_id)
     .bind(decision)
+    .bind(reason)
     .execute(get_db())
     .await?;
     Ok(())
 }
 
 pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
+    // Auto-deny if all participating votes are 'abstain'
+    sqlx::query(
+        r#"UPDATE votes SET status = 'failed'
+        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()
+          AND (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id) > 0
+          AND (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision != 'abstain') = 0"#,
+    )
+    .execute(get_db())
+    .await?;
+
+    // Normal resolution: yes > no → passed, otherwise failed
     sqlx::query(
         r#"UPDATE votes SET status = CASE
             WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
@@ -122,6 +137,21 @@ pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
     .execute(get_db())
     .await?;
     Ok(())
+}
+
+/// Return (initiated_by, title) for all newly resolved votes so callers can notify requesters.
+pub async fn get_newly_resolved_votes_for_notification() -> Result<Vec<(Uuid, Uuid, String, String)>, sqlx::Error> {
+    // Returns (id, initiated_by, title, status) for votes resolved within the last minute
+    let rows: Vec<(Uuid, Uuid, String, String)> = sqlx::query_as(
+        r#"SELECT id, initiated_by, title, status FROM votes
+           WHERE status IN ('passed','failed')
+             AND deadline IS NOT NULL
+             AND deadline > NOW() - INTERVAL '1 minute'
+             AND initiated_by IS NOT NULL"#,
+    )
+    .fetch_all(get_db())
+    .await?;
+    Ok(rows)
 }
 
 pub async fn get_all_votes() -> Result<Vec<VoteRow>, sqlx::Error> {
@@ -273,6 +303,92 @@ pub async fn insert_event_document(
 pub async fn get_all_event_documents() -> Result<Vec<EventDocumentRow>, sqlx::Error> {
     sqlx::query_as::<_, EventDocumentRow>(
         "SELECT id, title, description, event_date, venue, venue_invoice, logged_by, created_at FROM event_documents WHERE deleted_at IS NULL ORDER BY event_date DESC",
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+// ─────────────────── All-abstain auto-deny ───────────────────────
+
+/// If every ballot on this vote is 'abstain', immediately mark it failed.
+pub async fn auto_deny_all_abstain(vote_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE votes SET status = 'failed'
+           WHERE id = $1 AND status = 'open'
+             AND (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1) > 0
+             AND (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision != 'abstain') = 0"#,
+    )
+    .bind(vote_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+// ─────────────────── Librarian helpers ───────────────────────────
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct RedactedRecordRow {
+    pub id: Uuid,
+    pub table_name: String,
+    pub record_id: Uuid,
+    pub redact_reason: Option<String>,
+    pub redacted_by: Option<Uuid>,
+    pub redacted_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn insert_redacted_record(
+    table_name: &str,
+    record_id: Uuid,
+    reason: &str,
+    redacted_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO redacted_records (table_name, record_id, redact_reason, redacted_by) VALUES ($1,$2,$3,$4)",
+    )
+    .bind(table_name)
+    .bind(record_id)
+    .bind(reason)
+    .bind(redacted_by)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn insert_deleted_record_log(
+    table_name: &str,
+    record_id: Uuid,
+    reason: &str,
+    deleted_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO deleted_records_log (table_name, record_id, delete_reason, deleted_by) VALUES ($1,$2,$3,$4)",
+    )
+    .bind(table_name)
+    .bind(record_id)
+    .bind(reason)
+    .bind(deleted_by)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+/// Attempt to soft-delete a record in the given table by setting deleted_at.
+/// This is best-effort; not all tables have deleted_at.
+pub async fn soft_delete_record(table_name: &str, record_id: Uuid) -> Result<(), sqlx::Error> {
+    let query = format!(
+        "UPDATE {} SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+        table_name
+    );
+    sqlx::query(&query)
+        .bind(record_id)
+        .execute(get_db())
+        .await?;
+    Ok(())
+}
+
+pub async fn get_all_redacted_records() -> Result<Vec<RedactedRecordRow>, sqlx::Error> {
+    sqlx::query_as::<_, RedactedRecordRow>(
+        "SELECT id, table_name, record_id, redact_reason, redacted_by, redacted_at FROM redacted_records ORDER BY redacted_at DESC",
     )
     .fetch_all(get_db())
     .await

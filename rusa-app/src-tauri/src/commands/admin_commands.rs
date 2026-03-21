@@ -188,3 +188,39 @@ pub async fn override_vote(
 
     Ok(())
 }
+
+/// The Director role can create staff accounts (highest-level administrative create capability).
+#[tauri::command]
+pub async fn director_create_account(
+    token: String,
+    username: String,
+    email: String,
+    password: String,
+    full_name: String,
+    role_name: String,
+    location: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "the_director" && session.role_name != "the_administrator" {
+        return Err("Only the_director or the_administrator can create staff accounts via this endpoint".to_string());
+    }
+
+    let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
+        .map_err(|e| format!("Hash error: {}", e))?;
+
+    let user = query_create_user(&username, &email, &hash, &full_name, &role_name, location.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "DIRECTOR_CREATE_ACCOUNT",
+        Some("users"),
+        Some(user.id),
+        None,
+        Some(serde_json::json!({ "username": username, "role": role_name })),
+    )
+    .await;
+
+    Ok(user.id.to_string())
+}

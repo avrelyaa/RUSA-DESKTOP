@@ -236,8 +236,8 @@ export const sanitaryApi = {
 export const governanceApi = {
   initiateVote: (token: string, title: string, description?: string) =>
     invoke<string>('initiate_vote', { token, title, description }),
-  castVote: (token: string, voteId: string, decision: string) =>
-    invoke<void>('cast_vote', { token, voteId, decision }),
+  castVote: (token: string, voteId: string, decision: string, reason: string) =>
+    invoke<void>('cast_vote', { token, voteId, decision, reason }),
   getVotes: (token: string) => invoke<any[]>('get_votes', { token }),
   getVoteDetails: (token: string, voteId: string) => invoke<any>('get_vote_details', { token, voteId }),
   interruptVote: (token: string, voteId: string) => invoke<void>('interrupt_vote', { token, voteId }),
@@ -247,8 +247,14 @@ export const governanceApi = {
   relocateStaff: (token: string, staffId: string, toLocation: string, relocationType: string, startDate?: string, endDate?: string, reason?: string) =>
     invoke<string>('relocate_staff', { token, staffId, toLocation, relocationType, startDate, endDate, reason }),
   getRelocations: (token: string) => invoke<any[]>('get_relocations', { token }),
+  getRelocatableLocations: (token: string) => invoke<string[]>('get_relocatable_locations', { token }),
   setArchivePermission: (token: string, tableName: string, recordId: string, accessLevel: string) =>
     invoke<void>('set_archive_permission', { token, tableName, recordId, accessLevel }),
+  redactRecord: (token: string, tableName: string, recordId: string, reason: string) =>
+    invoke<void>('redact_record', { token, tableName, recordId, reason }),
+  deleteRecord: (token: string, tableName: string, recordId: string, reason: string) =>
+    invoke<void>('librarian_delete_record', { token, tableName, recordId, reason }),
+  getRedactedRecords: (token: string) => invoke<any[]>('get_redacted_records', { token }),
   logEvent: (token: string, title: string, description?: string, eventDate?: string, venue?: string, venueInvoice?: string) =>
     invoke<string>('log_event_document', { token, title, description, eventDate, venue, venueInvoice }),
   getEvents: (token: string) => invoke<any[]>('get_event_documents', { token }),
@@ -292,9 +298,11 @@ export const adminApi = {
     invoke<any[]>('get_audit_log', { token, limit, offset }),
   overrideVote: (token: string, voteId: string, outcome: string) =>
     invoke<void>('override_vote', { token, voteId, outcome }),
+  directorCreateAccount: (token: string, username: string, email: string, password: string, fullName: string, roleName: string, location?: string) =>
+    invoke<string>('director_create_account', { token, username, email, password, fullName, roleName, location }),
 };
 
-// Research Tasks (Observer/Artificer proxy chain)
+// Research Tasks (Observer/Artificer/Taskmaster proxy chain)
 export const researchTaskApi = {
   assign: (token: string, title: string, description?: string, assignedTo?: string, sourceMessageId?: string, dueDate?: string) =>
     invoke<string>('assign_research_task', { token, title, description, assignedTo, sourceMessageId, dueDate }),
@@ -304,6 +312,37 @@ export const researchTaskApi = {
   complete: (token: string, taskId: string) =>
     invoke<void>('complete_research_task', { token, taskId }),
 };
+
+// Security Tasks (Guardian)
+export const securityTaskApi = {
+  assign: (token: string, assignedTo: string, title: string, description?: string, priority?: string, dueDate?: string) =>
+    invoke<string>('assign_security_task', { token, assignedTo, title, description, priority, dueDate }),
+  getTasks: (token: string) => invoke<any[]>('get_security_tasks', { token }),
+  update: (token: string, taskId: string, status: string, resultNotes?: string) =>
+    invoke<void>('update_security_task', { token, taskId, status, resultNotes }),
+};
+
+// Planet commands (Wanderer)
+export const planetApi = {
+  getPlanets: (token: string) => invoke<any[]>('get_planets', { token }),
+  createPlanet: (token: string, name: string, description?: string, sectorId?: string, planetType?: string) =>
+    invoke<string>('create_planet', { token, name, description, sectorId, planetType }),
+  renamePlanet: (token: string, planetId: string, newName: string) =>
+    invoke<void>('rename_planet', { token, planetId, newName }),
+};
+
+// Astronaut conclusion (two-stage)
+export const conclusionApi = {
+  wandererReview: (token: string, requestId: string, recommendation: string, reviewNotes?: string) =>
+    invoke<void>('wanderer_review_conclusion', { token, requestId, recommendation, reviewNotes }),
+};
+
+// Settlement escalation
+export const settlementEscalationApi = {
+  escalate: (token: string, anomalyReportId: string, reason: string) =>
+    invoke<string>('escalate_anomaly_to_directors', { token, anomalyReportId, reason }),
+};
+
 
 // Types
 export interface SessionData {

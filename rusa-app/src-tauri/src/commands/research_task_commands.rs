@@ -49,8 +49,14 @@ pub async fn assign_research_task(
     due_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" {
-        return Err("Only the_observer or the_artificer can assign research tasks".to_string());
+    // Observer, Artificer, and Taskmaster can assign research tasks
+    // (Taskmaster holds combined authority from Wanderer, Observer, and Artificer)
+    if session.role_name != "the_observer"
+        && session.role_name != "the_artificer"
+        && session.role_name != "the_taskmaster"
+        && session.role_name != "the_administrator"
+    {
+        return Err("Only the_observer, the_artificer, the_taskmaster, or the_administrator can assign research tasks".to_string());
     }
 
     ensure_research_tasks_table().await?;
@@ -176,9 +182,13 @@ pub async fn submit_research_task_result(
 #[tauri::command]
 pub async fn complete_research_task(token: String, task_id: String) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" {
+    if session.role_name != "the_observer"
+        && session.role_name != "the_artificer"
+        && session.role_name != "the_taskmaster"
+        && session.role_name != "the_administrator"
+    {
         return Err(
-            "Only the_observer or the_artificer can mark research tasks as completed".to_string(),
+            "Only the_observer, the_artificer, the_taskmaster, or the_administrator can mark research tasks as completed".to_string(),
         );
     }
 
@@ -197,7 +207,7 @@ pub async fn complete_research_task(token: String, task_id: String) -> Result<()
     match task {
         None => return Err("Task not found".to_string()),
         Some((assigned_by,)) => {
-            if assigned_by != session.user_id {
+            if assigned_by != session.user_id && session.role_name != "the_administrator" {
                 return Err("You can only complete tasks that you assigned".to_string());
             }
         }
