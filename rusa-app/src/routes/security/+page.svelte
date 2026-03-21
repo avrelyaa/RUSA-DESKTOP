@@ -60,6 +60,7 @@
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
+    const isManager = s.role_name === 'the_guardian' || s.role_name === 'the_overseer';
     try {
       const promises: Promise<any>[] = [
         securityApi.getIncidents(s.token),
@@ -68,10 +69,10 @@
         securityApi.getFindings(s.token),
         securityApi.getSecurityTasks(s.token),
       ];
-      if (isTaskManager) promises.push(userApi.getAll(s.token));
+      if (isManager) promises.push(userApi.getAll(s.token));
       const results = await Promise.all(promises);
       [incidents, lostFound, broadcasts, findings, securityTasks] = results as any[];
-      if (isTaskManager) allUsers = results[5] as any[];
+      if (isManager) allUsers = results[5] as any[];
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });

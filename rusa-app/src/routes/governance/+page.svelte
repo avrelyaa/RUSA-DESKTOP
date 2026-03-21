@@ -109,16 +109,16 @@
         governanceApi.getEvents(s.token),
       ]);
       [votes, meetings, relocations, events] = base;
-      if (isNomad) {
+      if (s.role_name === 'the_nomad') {
         nomadTasks = await governanceApi.getNomadTasks(s.token);
         allUsers = await userApi.getAll(s.token);
       }
-      if (isLibrarian) {
+      if (s.role_name === 'the_librarian') {
         try { archivePermissions = await governanceApi.getArchivePermissions(s.token); } catch {}
       }
-      if (isDirectorOrAbove) {
+      if (s.tier >= 3) {
         allRoles = await userApi.getRoles(s.token);
-        if (!isNomad) allUsers = await userApi.getAll(s.token);
+        if (s.role_name !== 'the_nomad') allUsers = await userApi.getAll(s.token);
       }
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
