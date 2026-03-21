@@ -8,12 +8,13 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'missions' | 'journals' | 'sectors' | 'conclusion_requests';
+  type Tab = 'missions' | 'journals' | 'sectors' | 'planets' | 'conclusion_requests';
   let activeTab = $state<Tab>('missions');
 
   let missions: any[] = $state([]);
   let journals: any[] = $state([]);
   let sectors: any[] = $state([]);
+  let planets: any[] = $state([]);
   let ships: any[] = $state([]);
   let conclusionRequests: any[] = $state([]);
   let loading = $state(false);
@@ -38,6 +39,16 @@
   let secName = $state('');
   let secDesc = $state('');
 
+  // Planet form
+  let planetOpen = $state(false);
+  let planetName = $state('');
+  let planetDesc = $state('');
+  let planetStar = $state('');
+  // Rename planet
+  let renamePlanetOpen = $state(false);
+  let renamePlanetId = $state('');
+  let renamePlanetName = $state('');
+
   // Conclusion request form (astronaut)
   let conclusionOpen = $state(false);
   let cMissionId = $state('');
@@ -49,6 +60,7 @@
   let reviewDecision = $state('approved');
   let reviewNotes = $state('');
 
+  const isWanderer = $derived($session?.role_name === 'the_wanderer');
   const isDirector = $derived(
     $session?.role_name === 'the_wanderer' || $session?.role_name === 'the_taskmaster'
   );
@@ -57,10 +69,11 @@
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [missions, journals, sectors, ships, conclusionRequests] = await Promise.all([
+      [missions, journals, sectors, planets, ships, conclusionRequests] = await Promise.all([
         astronautApi.getMissions(s.token),
         astronautApi.getJournals(s.token),
         astronautApi.getSectors(s.token),
+        astronautApi.getPlanets(s.token),
         astronautApi.getShips(s.token),
         astronautApi.getConclusionRequests(s.token),
       ]);
@@ -98,6 +111,34 @@
       showToast('Sector created', 'success');
       sectorOpen = false; secName = ''; secDesc = '';
       sectors = await astronautApi.getSectors(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function createPlanet() {
+    const s = $session; if (!s) return;
+    if (!planetName) { showToast('Name required', 'error'); return; }
+    try {
+      await astronautApi.createPlanet(s.token, planetName, planetDesc || undefined, planetStar || undefined);
+      showToast('Planet registered', 'success');
+      planetOpen = false; planetName = ''; planetDesc = ''; planetStar = '';
+      planets = await astronautApi.getPlanets(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openRenamePlanet(row: any) {
+    renamePlanetId = row.id;
+    renamePlanetName = row.name;
+    renamePlanetOpen = true;
+  }
+
+  async function submitRenamePlanet() {
+    const s = $session; if (!s) return;
+    if (!renamePlanetName) { showToast('Name required', 'error'); return; }
+    try {
+      await astronautApi.renamePlanet(s.token, renamePlanetId, renamePlanetName);
+      showToast('Planet renamed', 'success');
+      renamePlanetOpen = false;
+      planets = await astronautApi.getPlanets(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -144,6 +185,11 @@
     { key: 'name', label: 'Sector Name' },
     { key: 'description', label: 'Description' },
   ];
+  const planetCols = [
+    { key: 'name', label: 'Planet Name' },
+    { key: 'description', label: 'Description' },
+    { key: 'star_system', label: 'Star System' },
+  ];
   const conclusionCols = [
     { key: 'mission_id', label: 'Mission ID' },
     { key: 'report_summary', label: 'Report Summary' },
@@ -154,11 +200,12 @@
 
 <svelte:head><title>RUSA IMS — Astronautics</title></svelte:head>
 
-<PageShell title="Astronautics" subtitle="Missions, exploration journals, and sector management">
+<PageShell title="Astronautics" subtitle="Missions, exploration journals, sector and planet management">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='missions'} onclick={() => activeTab='missions'}>Missions</button>
     <button class="tab" class:active={activeTab==='journals'} onclick={() => activeTab='journals'}>Journals</button>
     <button class="tab" class:active={activeTab==='sectors'} onclick={() => activeTab='sectors'}>Sectors</button>
+    <button class="tab" class:active={activeTab==='planets'} onclick={() => activeTab='planets'}>Planets</button>
     <button class="tab" class:active={activeTab==='conclusion_requests'} onclick={() => activeTab='conclusion_requests'}>Conclusion Requests</button>
   </div>
 
@@ -179,9 +226,25 @@
   {:else if activeTab === 'sectors'}
     <div class="section-bar">
       <h2 class="section-title">Sectors</h2>
-      <button class="btn-primary" onclick={() => sectorOpen = true}>+ Create Sector</button>
+      {#if isWanderer}
+        <button class="btn-primary" onclick={() => sectorOpen = true}>+ Create Sector</button>
+      {/if}
     </div>
     <Table columns={sectorCols} rows={sectors} />
+  {:else if activeTab === 'planets'}
+    <div class="section-bar">
+      <h2 class="section-title">Planets</h2>
+      {#if isWanderer}
+        <button class="btn-primary" onclick={() => planetOpen = true}>+ Register Planet</button>
+      {/if}
+    </div>
+    <Table columns={planetCols} rows={planets}>
+      {#snippet rowActions(row)}
+        {#if isWanderer}
+          <button class="btn-action" onclick={() => openRenamePlanet(row)}>Rename</button>
+        {/if}
+      {/snippet}
+    </Table>
   {:else if activeTab === 'conclusion_requests'}
     <div class="section-bar">
       <h2 class="section-title">Conclusion Requests</h2>
@@ -232,6 +295,28 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => sectorOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={createSector}>Create</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={planetOpen} title="Register Planet">
+  <div class="form">
+    <Field label="Planet Name" bind:value={planetName} required />
+    <Field label="Description" type="textarea" bind:value={planetDesc} />
+    <Field label="Star System" bind:value={planetStar} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => planetOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={createPlanet}>Register</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={renamePlanetOpen} title="Rename Planet">
+  <div class="form">
+    <Field label="New Name" bind:value={renamePlanetName} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => renamePlanetOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitRenamePlanet}>Rename</button>
     </div>
   </div>
 </Modal>

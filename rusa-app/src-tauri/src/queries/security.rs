@@ -205,3 +205,81 @@ pub async fn get_all_security_findings() -> Result<Vec<SecurityFindingRow>, sqlx
     .fetch_all(get_db())
     .await
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct SecurityTaskRow {
+    pub id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+    pub assigned_to: Option<Uuid>,
+    pub assigned_by: Option<Uuid>,
+    pub status: String,
+    pub due_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn ensure_security_tasks_table() -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS security_tasks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to UUID REFERENCES users(id),
+            assigned_by UUID REFERENCES users(id),
+            status TEXT NOT NULL DEFAULT 'pending',
+            due_date TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )"#,
+    )
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn insert_security_task(
+    title: &str,
+    description: Option<&str>,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    due_date: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO security_tasks (title, description, assigned_to, assigned_by, status, due_date) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id",
+    )
+    .bind(title)
+    .bind(description)
+    .bind(assigned_to)
+    .bind(assigned_by)
+    .bind(due_date)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn get_security_tasks_for_assigner(assigner_id: Uuid) -> Result<Vec<SecurityTaskRow>, sqlx::Error> {
+    sqlx::query_as::<_, SecurityTaskRow>(
+        "SELECT id, title, description, assigned_to, assigned_by, status, due_date, created_at FROM security_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(assigner_id)
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_security_tasks_for_user(user_id: Uuid) -> Result<Vec<SecurityTaskRow>, sqlx::Error> {
+    sqlx::query_as::<_, SecurityTaskRow>(
+        "SELECT id, title, description, assigned_to, assigned_by, status, due_date, created_at FROM security_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn update_security_task_status(task_id: Uuid, status: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE security_tasks SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+        .bind(status)
+        .bind(task_id)
+        .execute(get_db())
+        .await?;
+    Ok(())
+}

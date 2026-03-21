@@ -359,3 +359,56 @@ pub async fn review_conclusion_request(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn get_planets(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = astronaut_queries::get_all_planets()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn create_planet(
+    token: String,
+    name: String,
+    description: Option<String>,
+    star_system: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_wanderer")?;
+
+    let id = astronaut_queries::insert_planet(
+        &name,
+        description.as_deref(),
+        star_system.as_deref(),
+        session.user_id,
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "CREATE_PLANET", Some("planets"), Some(id), None, Some(serde_json::json!({ "name": name }))).await;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn rename_planet(
+    token: String,
+    planet_id: String,
+    new_name: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_wanderer")?;
+
+    let pid = Uuid::parse_str(&planet_id).map_err(|_| "Invalid planet ID".to_string())?;
+
+    astronaut_queries::update_planet_name(pid, &new_name)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "RENAME_PLANET", Some("planets"), Some(pid), None, Some(serde_json::json!({ "new_name": new_name }))).await;
+    Ok(())
+}

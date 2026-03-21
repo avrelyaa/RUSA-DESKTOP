@@ -354,3 +354,67 @@ pub async fn complete_mission(mission_id: Uuid) -> Result<(), sqlx::Error> {
     .await?;
     Ok(())
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct PlanetRow {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub star_system: Option<String>,
+    pub created_by: Option<Uuid>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn ensure_planets_table() -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS planets (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name TEXT NOT NULL,
+            description TEXT,
+            star_system TEXT,
+            created_by UUID REFERENCES users(id),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )"#,
+    )
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn get_all_planets() -> Result<Vec<PlanetRow>, sqlx::Error> {
+    ensure_planets_table().await?;
+    sqlx::query_as::<_, PlanetRow>(
+        "SELECT id, name, description, star_system, created_by, created_at FROM planets WHERE deleted_at IS NULL ORDER BY name ASC",
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn insert_planet(
+    name: &str,
+    description: Option<&str>,
+    star_system: Option<&str>,
+    created_by: Uuid,
+) -> Result<Uuid, sqlx::Error> {
+    ensure_planets_table().await?;
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO planets (name, description, star_system, created_by) VALUES ($1,$2,$3,$4) RETURNING id",
+    )
+    .bind(name)
+    .bind(description)
+    .bind(star_system)
+    .bind(created_by)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn update_planet_name(planet_id: Uuid, new_name: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE planets SET name = $1 WHERE id = $2 AND deleted_at IS NULL")
+        .bind(new_name)
+        .bind(planet_id)
+        .execute(get_db())
+        .await?;
+    Ok(())
+}

@@ -4,17 +4,19 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { securityApi } from '$lib/api';
+  import { securityApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'incidents' | 'lostfound' | 'broadcasts' | 'findings';
+  type Tab = 'incidents' | 'lostfound' | 'broadcasts' | 'findings' | 'tasks';
   let activeTab = $state<Tab>('incidents');
 
   let incidents: any[] = $state([]);
   let lostFound: any[] = $state([]);
   let broadcasts: any[] = $state([]);
   let findings: any[] = $state([]);
+  let securityTasks: any[] = $state([]);
+  let allUsers: any[] = $state([]);
   let loading = $state(false);
 
   // Incident form
@@ -44,19 +46,47 @@
   let findDesc = $state('');
   let findDate = $state('');
 
+  // Task assignment form (guardian/overseer)
+  let taskOpen = $state(false);
+  let taskAssignee = $state('');
+  let taskTitle = $state('');
+  let taskDesc = $state('');
+  let taskDue = $state('');
+
+  const isTaskManager = $derived(
+    $session?.role_name === 'the_guardian' || $session?.role_name === 'the_overseer'
+  );
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
+    const isManager = s.role_name === 'the_guardian' || s.role_name === 'the_overseer';
     try {
-      [incidents, lostFound, broadcasts, findings] = await Promise.all([
+      const promises: Promise<any>[] = [
         securityApi.getIncidents(s.token),
         securityApi.getLostFound(s.token),
         securityApi.getBroadcastRequests(s.token),
         securityApi.getFindings(s.token),
-      ]);
+        securityApi.getSecurityTasks(s.token),
+      ];
+      if (isManager) promises.push(userApi.getAll(s.token));
+      const results = await Promise.all(promises);
+      [incidents, lostFound, broadcasts, findings, securityTasks] = results as any[];
+      if (isManager) allUsers = results[5] as any[];
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
+
+  async function assignTask() {
+    const s = $session; if (!s) return;
+    if (!taskAssignee || !taskTitle) { showToast('Assignee and title required', 'error'); return; }
+    try {
+      await securityApi.assignTask(s.token, taskAssignee, taskTitle, taskDesc || undefined, taskDue || undefined);
+      showToast('Task assigned', 'success');
+      taskOpen = false; taskAssignee = ''; taskTitle = ''; taskDesc = ''; taskDue = '';
+      securityTasks = await securityApi.getSecurityTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
 
   async function createIncident() {
     const s = $session; if (!s) return;
@@ -123,22 +153,29 @@
     { key: 'title', label: 'Title' },
     { key: 'findings_date', label: 'Date' },
   ];
+  const taskCols = [
+    { key: 'title', label: 'Task' },
+    { key: 'status', label: 'Status' },
+    { key: 'due_date', label: 'Due Date' },
+  ];
   const severityOpts = [
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
     { value: 'critical', label: 'Critical' },
   ];
+  let userOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
 </script>
 
 <svelte:head><title>RUSA IMS — Security</title></svelte:head>
 
-<PageShell title="Security Operations" subtitle="Incident reports, lost & found, broadcasts, and security findings">
+<PageShell title="Security Operations" subtitle="Incident reports, lost & found, broadcasts, security findings, and tasks">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='incidents'} onclick={() => activeTab='incidents'}>Incidents</button>
     <button class="tab" class:active={activeTab==='lostfound'} onclick={() => activeTab='lostfound'}>Lost & Found</button>
     <button class="tab" class:active={activeTab==='broadcasts'} onclick={() => activeTab='broadcasts'}>Broadcasts</button>
     <button class="tab" class:active={activeTab==='findings'} onclick={() => activeTab='findings'}>Findings</button>
+    <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
   </div>
 
   {#if loading}
@@ -167,6 +204,14 @@
       <button class="btn-primary" onclick={() => findingsOpen = true}>+ Submit Findings</button>
     </div>
     <Table columns={findingsCols} rows={findings} />
+  {:else if activeTab === 'tasks'}
+    <div class="section-bar">
+      <h2 class="section-title">Security Tasks</h2>
+      {#if isTaskManager}
+        <button class="btn-primary" onclick={() => taskOpen = true}>+ Assign Task</button>
+      {/if}
+    </div>
+    <Table columns={taskCols} rows={securityTasks} />
   {/if}
 </PageShell>
 
@@ -217,6 +262,19 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => findingsOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitFindings}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={taskOpen} title="Assign Security Task">
+  <div class="form">
+    <Field label="Assign To" type="select" bind:value={taskAssignee} options={userOptions} required />
+    <Field label="Task Title" bind:value={taskTitle} required />
+    <Field label="Description" type="textarea" bind:value={taskDesc} />
+    <Field label="Due Date" type="datetime-local" bind:value={taskDue} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => taskOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={assignTask}>Assign</button>
     </div>
   </div>
 </Modal>
