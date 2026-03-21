@@ -49,8 +49,8 @@ pub async fn assign_research_task(
     due_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" {
-        return Err("Only the_observer or the_artificer can assign research tasks".to_string());
+    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" {
+        return Err("Only the_observer, the_artificer, or the_taskmaster can assign research tasks".to_string());
     }
 
     ensure_research_tasks_table().await?;
@@ -98,7 +98,7 @@ pub async fn get_research_tasks(token: String) -> Result<Vec<serde_json::Value>,
 
     ensure_research_tasks_table().await?;
 
-    let rows = if session.role_name == "the_observer" || session.role_name == "the_artificer" {
+    let rows = if session.role_name == "the_observer" || session.role_name == "the_artificer" || session.role_name == "the_taskmaster" {
         sqlx::query_as::<_, ResearchTaskRow>(
             "SELECT id, title, description, assigned_to, assigned_by, source_message_id, status, result_notes, due_date, created_at FROM research_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         )
@@ -176,9 +176,9 @@ pub async fn submit_research_task_result(
 #[tauri::command]
 pub async fn complete_research_task(token: String, task_id: String) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_observer" && session.role_name != "the_artificer" {
+    if session.role_name != "the_observer" && session.role_name != "the_artificer" && session.role_name != "the_taskmaster" {
         return Err(
-            "Only the_observer or the_artificer can mark research tasks as completed".to_string(),
+            "Only the_observer, the_artificer, or the_taskmaster can mark research tasks as completed".to_string(),
         );
     }
 

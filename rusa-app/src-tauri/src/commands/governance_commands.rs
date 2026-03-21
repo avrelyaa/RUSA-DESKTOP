@@ -161,8 +161,8 @@ pub async fn relocate_staff(
     reason: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_nomad" && session.role_name != "the_administrator" {
-        return Err("Only nomad or administrator can relocate staff".to_string());
+    if session.role_name != "the_nomad" && session.role_name != "the_administrator" && session.role_name != "the_overseer" {
+        return Err("Only nomad, overseer, or administrator can relocate staff".to_string());
     }
 
     let sid = Uuid::parse_str(&staff_id).map_err(|_| "Invalid staff ID".to_string())?;
@@ -261,4 +261,296 @@ pub async fn get_event_documents(token: String) -> Result<Vec<serde_json::Value>
         .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+// ── Nomad Task Assignment ─────────────────────────────────────────────────────
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct NomadTaskRow {
+    id: uuid::Uuid,
+    title: String,
+    description: Option<String>,
+    assigned_to: Option<uuid::Uuid>,
+    assigned_by: Option<uuid::Uuid>,
+    target_role: Option<String>,
+    status: String,
+    due_date: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+async fn ensure_nomad_tasks_table() -> Result<(), String> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS nomad_tasks (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to UUID REFERENCES users(id),
+            assigned_by UUID REFERENCES users(id),
+            target_role TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            due_date TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            deleted_at TIMESTAMPTZ
+        )"#,
+    )
+    .execute(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error creating table: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn nomad_assign_task(
+    token: String,
+    assigned_to: String,
+    title: String,
+    description: Option<String>,
+    due_date: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_nomad")?;
+
+    ensure_nomad_tasks_table().await?;
+
+    let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
+
+    // Verify target is settler_commander or head_of_sanitary
+    #[derive(sqlx::FromRow)]
+    struct RoleCheck { role_name: String }
+    let check = sqlx::query_as::<_, RoleCheck>(
+        "SELECT r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1 AND u.deleted_at IS NULL"
+    )
+    .bind(atid)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let role_name = check
+        .ok_or_else(|| "User not found".to_string())?
+        .role_name;
+
+    if role_name != "settler_commander" && role_name != "head_of_sanitary" {
+        return Err("Nomad can only assign tasks to settler_commander or head_of_sanitary".to_string());
+    }
+
+    let dd = due_date
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc));
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO nomad_tasks (title, description, assigned_to, assigned_by, target_role, status, due_date) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id"
+    )
+    .bind(&title)
+    .bind(&description)
+    .bind(atid)
+    .bind(session.user_id)
+    .bind(&role_name)
+    .bind(dd)
+    .fetch_one(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "NOMAD_ASSIGN_TASK",
+        Some("nomad_tasks"),
+        Some(row.0),
+        None,
+        Some(serde_json::json!({ "title": title, "assigned_to": assigned_to, "target_role": role_name })),
+    )
+    .await;
+
+    Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_nomad_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    ensure_nomad_tasks_table().await?;
+
+    let rows = if session.role_name == "the_nomad" {
+        sqlx::query_as::<_, NomadTaskRow>(
+            "SELECT id, title, description, assigned_to, assigned_by, target_role, status, due_date, created_at FROM nomad_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        )
+        .bind(session.user_id)
+        .fetch_all(crate::db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+    } else {
+        sqlx::query_as::<_, NomadTaskRow>(
+            "SELECT id, title, description, assigned_to, assigned_by, target_role, status, due_date, created_at FROM nomad_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        )
+        .bind(session.user_id)
+        .fetch_all(crate::db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+    };
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn update_nomad_task_status(
+    token: String,
+    task_id: String,
+    status: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    ensure_nomad_tasks_table().await?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    sqlx::query("UPDATE nomad_tasks SET status = $1 WHERE id = $2 AND deleted_at IS NULL")
+        .bind(&status)
+        .bind(tid)
+        .execute(crate::db::get_db())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "UPDATE_NOMAD_TASK_STATUS",
+        Some("nomad_tasks"),
+        Some(tid),
+        None,
+        Some(serde_json::json!({ "status": status })),
+    )
+    .await;
+
+    Ok(())
+}
+
+// ── Librarian: Redact / Delete ────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn redact_record(
+    token: String,
+    table_name: String,
+    record_id: String,
+    redaction_reason: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_librarian")?;
+
+    let rid = Uuid::parse_str(&record_id).map_err(|_| "Invalid record ID".to_string())?;
+
+    // Store a redaction entry in archive_permissions with access_level = 'redacted'
+    governance_queries::upsert_archive_permission(&table_name, rid, "redacted", session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "REDACT_RECORD",
+        Some("archive_permissions"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "table_name": table_name, "reason": redaction_reason })),
+    )
+    .await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn librarian_delete_record(
+    token: String,
+    table_name: String,
+    record_id: String,
+    deletion_reason: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_librarian")?;
+
+    let rid = Uuid::parse_str(&record_id).map_err(|_| "Invalid record ID".to_string())?;
+
+    // Mark as deleted in archive_permissions with access_level = 'deleted'
+    governance_queries::upsert_archive_permission(&table_name, rid, "deleted", session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "LIBRARIAN_DELETE_RECORD",
+        Some("archive_permissions"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "table_name": table_name, "reason": deletion_reason })),
+    )
+    .await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_archive_permissions(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_librarian")?;
+
+    let rows = governance_queries::get_all_archive_permissions()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+// ── Director Create Account ───────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn director_create_account(
+    token: String,
+    username: String,
+    email: String,
+    password: String,
+    full_name: String,
+    role_name: String,
+    location: Option<String>,
+) -> Result<String, String> {
+    use crate::queries::users::create_user as query_create_user;
+
+    let session = validate_session_command(&token).await?;
+    // Directors (tier 3) and above can create accounts
+    if session.tier < 3 {
+        return Err("Only directors and above can create staff accounts".to_string());
+    }
+
+    // Directors cannot create other directors or admins — only administrator can do that
+    // Check that target role tier < 3
+    #[derive(sqlx::FromRow)]
+    struct TierCheck { tier: i32 }
+    let role_check = sqlx::query_as::<_, TierCheck>(
+        "SELECT tier FROM roles WHERE name = $1"
+    )
+    .bind(&role_name)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if let Some(rc) = role_check {
+        if rc.tier >= 3 && session.role_name != "the_administrator" {
+            return Err("Only the administrator can create director-tier or above accounts".to_string());
+        }
+    }
+
+    let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
+        .map_err(|e| format!("Hash error: {}", e))?;
+
+    let user = query_create_user(&username, &email, &hash, &full_name, &role_name, location.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "DIRECTOR_CREATE_ACCOUNT",
+        Some("users"),
+        Some(user.id),
+        None,
+        Some(serde_json::json!({ "username": username, "role": role_name })),
+    )
+    .await;
+
+    Ok(user.id.to_string())
 }

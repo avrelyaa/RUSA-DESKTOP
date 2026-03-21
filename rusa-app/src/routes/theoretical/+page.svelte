@@ -25,7 +25,7 @@
   let resultNotes = $state('');
 
   const isDirector = $derived(
-    $session?.role_name === 'the_observer' || $session?.role_name === 'the_artificer'
+    $session?.role_name === 'the_observer' || $session?.role_name === 'the_artificer' || $session?.role_name === 'the_taskmaster'
   );
 
   const taskCols = [

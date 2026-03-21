@@ -19,8 +19,8 @@
   const navItems: NavItem[] = [
     { path: '/dashboard', label: 'Dashboard', icon: '⌂' },
     { path: '/messages', label: 'Messages', icon: '✉' },
-    { path: '/research', label: 'Research & Lab', icon: '⚗', roles: ['biologist', 'chemist', 'biological_engineer', 'agricultural_engineer', 'the_observer'] },
-    { path: '/theoretical', label: 'Theoretical Sciences', icon: '∑', roles: ['mathematician', 'the_artificer'] },
+    { path: '/research', label: 'Research & Lab', icon: '⚗', roles: ['biologist', 'chemist', 'biological_engineer', 'agricultural_engineer', 'the_observer', 'the_taskmaster'] },
+    { path: '/theoretical', label: 'Theoretical Sciences', icon: '∑', roles: ['mathematician', 'the_artificer', 'the_taskmaster'] },
     { path: '/data-services', label: 'Data Services', icon: '◈', roles: ['data_analyst', 'the_statistician'] },
     { path: '/data-request', label: 'Request Data', icon: '◇' },
     { path: '/security', label: 'Security', icon: '⚔', roles: ['earth_security_head', 'earth_security_staff', 'galactic_security_head', 'galactic_security_staff', 'the_guardian', 'the_overseer'] },

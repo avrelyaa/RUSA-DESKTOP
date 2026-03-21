@@ -277,3 +277,21 @@ pub async fn get_all_event_documents() -> Result<Vec<EventDocumentRow>, sqlx::Er
     .fetch_all(get_db())
     .await
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct ArchivePermissionRow {
+    pub id: Uuid,
+    pub table_name: String,
+    pub record_id: Uuid,
+    pub access_level: String,
+    pub set_by: Uuid,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn get_all_archive_permissions() -> Result<Vec<ArchivePermissionRow>, sqlx::Error> {
+    sqlx::query_as::<_, ArchivePermissionRow>(
+        "SELECT id, table_name, record_id, access_level, set_by, created_at FROM archive_permissions ORDER BY created_at DESC",
+    )
+    .fetch_all(get_db())
+    .await
+}

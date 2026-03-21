@@ -84,6 +84,11 @@ export const securityApi = {
   submitFindings: (token: string, title: string, description?: string, findingsDate?: string) =>
     invoke<string>('submit_security_findings', { token, title, description, findingsDate }),
   getFindings: (token: string) => invoke<any[]>('get_security_findings', { token }),
+  assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
+    invoke<string>('assign_security_task', { token, assignedTo, title, description, dueDate }),
+  getSecurityTasks: (token: string) => invoke<any[]>('get_security_tasks', { token }),
+  updateSecurityTaskStatus: (token: string, taskId: string, status: string) =>
+    invoke<void>('update_security_task_status', { token, taskId, status }),
 };
 
 // Astronautics
@@ -106,6 +111,11 @@ export const astronautApi = {
     invoke<string>('create_sector', { token, name, description, boundaries }),
   renameSector: (token: string, sectorId: string, newName: string) =>
     invoke<void>('rename_sector', { token, sectorId, newName }),
+  getPlanets: (token: string) => invoke<any[]>('get_planets', { token }),
+  createPlanet: (token: string, name: string, description?: string, starSystem?: string) =>
+    invoke<string>('create_planet', { token, name, description, starSystem }),
+  renamePlanet: (token: string, planetId: string, newName: string) =>
+    invoke<void>('rename_planet', { token, planetId, newName }),
   getShips: (token: string) => invoke<any[]>('get_ships', { token }),
   getStats: (token: string, astronautId?: string) => invoke<any>('get_astronaut_stats', { token, astronautId }),
   submitConclusionRequest: (token: string, missionId: string, reportSummary?: string) =>
@@ -249,9 +259,21 @@ export const governanceApi = {
   getRelocations: (token: string) => invoke<any[]>('get_relocations', { token }),
   setArchivePermission: (token: string, tableName: string, recordId: string, accessLevel: string) =>
     invoke<void>('set_archive_permission', { token, tableName, recordId, accessLevel }),
+  getArchivePermissions: (token: string) => invoke<any[]>('get_archive_permissions', { token }),
+  redactRecord: (token: string, tableName: string, recordId: string, redactionReason?: string) =>
+    invoke<void>('redact_record', { token, tableName, recordId, redactionReason }),
+  deleteRecord: (token: string, tableName: string, recordId: string, deletionReason?: string) =>
+    invoke<void>('librarian_delete_record', { token, tableName, recordId, deletionReason }),
   logEvent: (token: string, title: string, description?: string, eventDate?: string, venue?: string, venueInvoice?: string) =>
     invoke<string>('log_event_document', { token, title, description, eventDate, venue, venueInvoice }),
   getEvents: (token: string) => invoke<any[]>('get_event_documents', { token }),
+  nomadAssignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
+    invoke<string>('nomad_assign_task', { token, assignedTo, title, description, dueDate }),
+  getNomadTasks: (token: string) => invoke<any[]>('get_nomad_tasks', { token }),
+  updateNomadTaskStatus: (token: string, taskId: string, status: string) =>
+    invoke<void>('update_nomad_task_status', { token, taskId, status }),
+  directorCreateAccount: (token: string, username: string, email: string, password: string, fullName: string, roleName: string, location?: string) =>
+    invoke<string>('director_create_account', { token, username, email, password, fullName, roleName, location }),
 };
 
 // Budget

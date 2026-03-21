@@ -201,3 +201,101 @@ pub async fn get_security_findings(token: String) -> Result<Vec<serde_json::Valu
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
+
+#[tauri::command]
+pub async fn assign_security_task(
+    token: String,
+    assigned_to: String,
+    title: String,
+    description: Option<String>,
+    due_date: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "the_guardian" && session.role_name != "the_overseer" {
+        return Err("Only the_guardian or the_overseer can assign security tasks".to_string());
+    }
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error creating table: {}", e))?;
+
+    let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
+    let dd = due_date
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.with_timezone(&chrono::Utc));
+
+    let id = security_queries::insert_security_task(
+        &title,
+        description.as_deref(),
+        atid,
+        session.user_id,
+        dd,
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "ASSIGN_SECURITY_TASK",
+        Some("security_tasks"),
+        Some(id),
+        None,
+        Some(serde_json::json!({ "title": title, "assigned_to": assigned_to })),
+    )
+    .await;
+
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn get_security_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let rows = if session.role_name == "the_guardian" || session.role_name == "the_overseer" {
+        security_queries::get_security_tasks_for_assigner(session.user_id).await
+    } else {
+        security_queries::get_security_tasks_for_user(session.user_id).await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap_or_default())
+        .collect())
+}
+
+#[tauri::command]
+pub async fn update_security_task_status(
+    token: String,
+    task_id: String,
+    status: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    security_queries::ensure_security_tasks_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    security_queries::update_security_task_status(tid, &status)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "UPDATE_SECURITY_TASK_STATUS",
+        Some("security_tasks"),
+        Some(tid),
+        None,
+        Some(serde_json::json!({ "status": status })),
+    )
+    .await;
+
+    Ok(())
+}

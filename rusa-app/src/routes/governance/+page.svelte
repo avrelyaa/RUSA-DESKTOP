@@ -4,18 +4,28 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { governanceApi } from '$lib/api';
+  import { governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
 
-  type Tab = 'votes' | 'meetings' | 'relocations' | 'events';
+  type Tab = 'votes' | 'meetings' | 'relocations' | 'events' | 'nomad_tasks' | 'librarian' | 'accounts';
   let activeTab = $state<Tab>('votes');
 
   let votes: any[] = $state([]);
   let meetings: any[] = $state([]);
   let relocations: any[] = $state([]);
   let events: any[] = $state([]);
+  let nomadTasks: any[] = $state([]);
+  let archivePermissions: any[] = $state([]);
+  let allUsers: any[] = $state([]);
+  let allRoles: any[] = $state([]);
   let loading = $state(false);
+
+  const role = $derived($session?.role_name ?? '');
+  const tier = $derived($session?.tier ?? 0);
+  const isNomad = $derived(role === 'the_nomad');
+  const isLibrarian = $derived(role === 'the_librarian');
+  const isDirectorOrAbove = $derived(tier >= 3);
 
   // Vote form
   let voteOpen = $state(false);
@@ -50,16 +60,66 @@
   let eDate = $state('');
   let eVenue = $state('');
 
+  // Nomad task form
+  let nomadTaskOpen = $state(false);
+  let ntAssignee = $state('');
+  let ntTitle = $state('');
+  let ntDesc = $state('');
+  let ntDue = $state('');
+
+  // Librarian form
+  let librarianOpen = $state(false);
+  let libAction = $state<'restrict' | 'redact' | 'delete'>('restrict');
+  let libTable = $state('');
+  let libRecordId = $state('');
+  let libAccessLevel = $state('restricted');
+  let libReason = $state('');
+
+  // Director Create Account form
+  let createAccOpen = $state(false);
+  let caUsername = $state('');
+  let caEmail = $state('');
+  let caPassword = $state('');
+  let caFullName = $state('');
+  let caRole = $state('');
+  let caLocation = $state('');
+
+  // Predefined locations for relocation dropdown
+  const locationOptions = [
+    { value: 'Earth Base', label: 'Earth Base' },
+    { value: 'Space Station Alpha', label: 'Space Station Alpha' },
+    { value: 'Space Station Beta', label: 'Space Station Beta' },
+    { value: 'Mars Colony', label: 'Mars Colony' },
+    { value: 'Settlement Zone A', label: 'Settlement Zone A' },
+    { value: 'Settlement Zone B', label: 'Settlement Zone B' },
+    { value: 'Exoplanet Camp 1', label: 'Exoplanet Camp 1' },
+    { value: 'Exoplanet Camp 2', label: 'Exoplanet Camp 2' },
+    { value: 'Research Outpost', label: 'Research Outpost' },
+    { value: 'Deep Space', label: 'Deep Space' },
+  ];
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [votes, meetings, relocations, events] = await Promise.all([
+      const base = await Promise.all([
         governanceApi.getVotes(s.token),
         governanceApi.getMeetings(s.token),
         governanceApi.getRelocations(s.token),
         governanceApi.getEvents(s.token),
       ]);
+      [votes, meetings, relocations, events] = base;
+      if (isNomad) {
+        nomadTasks = await governanceApi.getNomadTasks(s.token);
+        allUsers = await userApi.getAll(s.token);
+      }
+      if (isLibrarian) {
+        try { archivePermissions = await governanceApi.getArchivePermissions(s.token); } catch {}
+      }
+      if (isDirectorOrAbove) {
+        allRoles = await userApi.getRoles(s.token);
+        if (!isNomad) allUsers = await userApi.getAll(s.token);
+      }
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
@@ -118,6 +178,46 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function nomadAssignTask() {
+    const s = $session; if (!s) return;
+    if (!ntAssignee || !ntTitle) { showToast('Assignee and title required', 'error'); return; }
+    try {
+      await governanceApi.nomadAssignTask(s.token, ntAssignee, ntTitle, ntDesc || undefined, ntDue || undefined);
+      showToast('Task assigned', 'success');
+      nomadTaskOpen = false; ntAssignee = ''; ntTitle = ''; ntDesc = ''; ntDue = '';
+      nomadTasks = await governanceApi.getNomadTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitLibrarianAction() {
+    const s = $session; if (!s) return;
+    if (!libTable || !libRecordId) { showToast('Table name and record ID required', 'error'); return; }
+    try {
+      if (libAction === 'restrict') {
+        await governanceApi.setArchivePermission(s.token, libTable, libRecordId, libAccessLevel || 'restricted');
+      } else if (libAction === 'redact') {
+        await governanceApi.redactRecord(s.token, libTable, libRecordId, libReason || undefined);
+      } else {
+        await governanceApi.deleteRecord(s.token, libTable, libRecordId, libReason || undefined);
+      }
+      showToast('Action completed', 'success');
+      librarianOpen = false; libTable = ''; libRecordId = ''; libReason = '';
+      try { archivePermissions = await governanceApi.getArchivePermissions(s.token); } catch {}
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function createAccount() {
+    const s = $session; if (!s) return;
+    if (!caUsername || !caEmail || !caPassword || !caFullName || !caRole) {
+      showToast('All required fields must be filled', 'error'); return;
+    }
+    try {
+      await governanceApi.directorCreateAccount(s.token, caUsername, caEmail, caPassword, caFullName, caRole, caLocation || undefined);
+      showToast('Account created', 'success');
+      createAccOpen = false; caUsername = ''; caEmail = ''; caPassword = ''; caFullName = ''; caRole = ''; caLocation = '';
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   const voteCols = [
     { key: 'title', label: 'Motion' },
     { key: 'status', label: 'Status' },
@@ -138,6 +238,18 @@
     { key: 'title', label: 'Event' },
     { key: 'event_date', label: 'Date' },
     { key: 'venue', label: 'Venue' },
+  ];
+  const nomadTaskCols = [
+    { key: 'title', label: 'Task' },
+    { key: 'target_role', label: 'Role' },
+    { key: 'status', label: 'Status' },
+    { key: 'due_date', label: 'Due' },
+  ];
+  const archivePermCols = [
+    { key: 'table_name', label: 'Table' },
+    { key: 'record_id', label: 'Record ID' },
+    { key: 'access_level', label: 'Access Level' },
+    { key: 'created_at', label: 'Set At' },
   ];
   const decisionOpts = [
     { value: 'yes', label: 'Yes' },
@@ -167,6 +279,23 @@
     { value: 'permanent', label: 'Permanent' },
     { value: 'transfer', label: 'Transfer' },
   ];
+  const accessLevelOpts = [
+    { value: 'restricted', label: 'Restricted' },
+    { value: 'classified', label: 'Classified' },
+    { value: 'public', label: 'Public' },
+  ];
+  const libActionOpts = [
+    { value: 'restrict', label: 'Restrict Access' },
+    { value: 'redact', label: 'Redact (Censor)' },
+    { value: 'delete', label: 'Delete Record' },
+  ];
+  let nomadTargetOptions = $derived(
+    allUsers
+      .filter((u: any) => u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary')
+      .map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` }))
+  );
+  let staffOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
+  let roleOptions = $derived(allRoles.map((r: any) => ({ value: r.name, label: r.display_name || r.name })));
 </script>
 
 <svelte:head><title>RUSA IMS — Governance</title></svelte:head>
@@ -177,6 +306,15 @@
     <button class="tab" class:active={activeTab==='meetings'} onclick={() => activeTab='meetings'}>Meetings</button>
     <button class="tab" class:active={activeTab==='relocations'} onclick={() => activeTab='relocations'}>Relocations</button>
     <button class="tab" class:active={activeTab==='events'} onclick={() => activeTab='events'}>Events</button>
+    {#if isNomad}
+      <button class="tab" class:active={activeTab==='nomad_tasks'} onclick={() => activeTab='nomad_tasks'}>Assign Tasks</button>
+    {/if}
+    {#if isLibrarian}
+      <button class="tab" class:active={activeTab==='librarian'} onclick={() => activeTab='librarian'}>Data Governance</button>
+    {/if}
+    {#if isDirectorOrAbove}
+      <button class="tab" class:active={activeTab==='accounts'} onclick={() => activeTab='accounts'}>Accounts</button>
+    {/if}
   </div>
 
   {#if loading}
@@ -230,6 +368,33 @@
       <button class="btn-primary" onclick={() => eventOpen = true}>+ Log Event</button>
     </div>
     <Table columns={eventCols} rows={events} />
+  {:else if activeTab === 'nomad_tasks'}
+    <div class="section-bar">
+      <h2 class="section-title">Task Assignments</h2>
+      <button class="btn-primary" onclick={() => nomadTaskOpen = true}>+ Assign Task</button>
+    </div>
+    <Table columns={nomadTaskCols} rows={nomadTasks} />
+  {:else if activeTab === 'librarian'}
+    <div class="section-bar">
+      <h2 class="section-title">Data Governance Actions</h2>
+      <button class="btn-primary" onclick={() => librarianOpen = true}>+ New Action</button>
+    </div>
+    <Table columns={archivePermCols} rows={archivePermissions} />
+  {:else if activeTab === 'accounts'}
+    <div class="section-bar">
+      <h2 class="section-title">Create Staff Account</h2>
+    </div>
+    <div class="director-card">
+      <Field label="Username" bind:value={caUsername} required />
+      <div style="margin-top: 1rem;"><Field label="Email" type="email" bind:value={caEmail} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Password" type="password" bind:value={caPassword} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Full Name" bind:value={caFullName} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Role" type="select" bind:value={caRole} options={roleOptions} required /></div>
+      <div style="margin-top: 1rem;"><Field label="Location" bind:value={caLocation} /></div>
+      <div class="form-actions" style="margin-top: 1.5rem;">
+        <button class="btn-primary" onclick={createAccount}>Create Account</button>
+      </div>
+    </div>
   {/if}
 </PageShell>
 
@@ -272,8 +437,8 @@
 
 <Modal bind:open={relocOpen} title="Relocate Staff">
   <div class="form">
-    <Field label="Staff User ID" bind:value={rStaff} required />
-    <Field label="Destination" bind:value={rLocation} required />
+    <Field label="Staff Member" type="select" bind:value={rStaff} options={staffOptions} required />
+    <Field label="Destination" type="select" bind:value={rLocation} options={locationOptions} required />
     <Field label="Type" type="select" bind:value={rType} options={relocTypeOpts} required />
     <Field label="Start Date" type="date" bind:value={rStart} />
     <Field label="End Date" type="date" bind:value={rEnd} />
@@ -294,6 +459,36 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => eventOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={logEvent}>Log</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={nomadTaskOpen} title="Assign Task">
+  <div class="form">
+    <Field label="Assign To (Settler Commander or Head of Sanitary)" type="select" bind:value={ntAssignee} options={nomadTargetOptions} required />
+    <Field label="Task Title" bind:value={ntTitle} required />
+    <Field label="Description" type="textarea" bind:value={ntDesc} />
+    <Field label="Due Date" type="datetime-local" bind:value={ntDue} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => nomadTaskOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={nomadAssignTask}>Assign</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={librarianOpen} title="Data Governance Action">
+  <div class="form">
+    <Field label="Action Type" type="select" bind:value={libAction} options={libActionOpts} required />
+    <Field label="Table Name" bind:value={libTable} required placeholder="e.g. research_tasks, missions" />
+    <Field label="Record ID (UUID)" bind:value={libRecordId} required />
+    {#if libAction === 'restrict'}
+      <Field label="Access Level" type="select" bind:value={libAccessLevel} options={accessLevelOpts} required />
+    {:else}
+      <Field label="Reason" type="textarea" bind:value={libReason} />
+    {/if}
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => librarianOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitLibrarianAction}>Apply</button>
     </div>
   </div>
 </Modal>
@@ -326,4 +521,5 @@
   .status-interrupted { background: rgba(255,170,0,0.12); color: #ffaa00; }
   .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
   .vote-timer { font-size: 0.82rem; color: #8fa3cc; margin: 0; }
+  .director-card { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.5rem; max-width: 500px; }
 </style>

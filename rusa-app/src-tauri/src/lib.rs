@@ -68,6 +68,9 @@ pub fn run() {
             commands::security_commands::review_broadcast_request,
             commands::security_commands::submit_security_findings,
             commands::security_commands::get_security_findings,
+            commands::security_commands::assign_security_task,
+            commands::security_commands::get_security_tasks,
+            commands::security_commands::update_security_task_status,
             // astronaut
             commands::astronaut_commands::get_missions,
             commands::astronaut_commands::create_mission,
@@ -85,6 +88,9 @@ pub fn run() {
             commands::astronaut_commands::submit_conclusion_request,
             commands::astronaut_commands::get_conclusion_requests,
             commands::astronaut_commands::review_conclusion_request,
+            commands::astronaut_commands::get_planets,
+            commands::astronaut_commands::create_planet,
+            commands::astronaut_commands::rename_planet,
             // settlement
             commands::settlement_commands::get_settlements,
             commands::settlement_commands::get_settler_tasks,
@@ -170,6 +176,13 @@ pub fn run() {
             commands::governance_commands::set_archive_permission,
             commands::governance_commands::log_event_document,
             commands::governance_commands::get_event_documents,
+            commands::governance_commands::nomad_assign_task,
+            commands::governance_commands::get_nomad_tasks,
+            commands::governance_commands::update_nomad_task_status,
+            commands::governance_commands::redact_record,
+            commands::governance_commands::librarian_delete_record,
+            commands::governance_commands::get_archive_permissions,
+            commands::governance_commands::director_create_account,
             // budget
             commands::budget_commands::get_budget_requests,
             commands::budget_commands::review_budget_request,
