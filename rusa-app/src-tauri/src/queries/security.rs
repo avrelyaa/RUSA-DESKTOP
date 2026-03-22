@@ -283,3 +283,50 @@ pub async fn update_security_task_status(task_id: Uuid, status: &str) -> Result<
         .await?;
     Ok(())
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct ExternalReportRow {
+    pub id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+    pub submitted_by: Option<Uuid>,
+    pub security_type: Option<String>,
+    pub status: Option<String>,
+    pub incident_report_id: Option<Uuid>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub async fn insert_external_report(
+    title: &str,
+    description: &str,
+    submitted_by: Uuid,
+    security_type: Option<&str>,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO external_reports (title, description, submitted_by, security_type, status) VALUES ($1,$2,$3,$4,'submitted') RETURNING id",
+    )
+    .bind(title)
+    .bind(description)
+    .bind(submitted_by)
+    .bind(security_type)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn get_all_external_reports() -> Result<Vec<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(
+        "SELECT id, title, description, submitted_by, security_type, status, incident_report_id, created_at FROM external_reports WHERE deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_external_reports_by_submitter(submitted_by: Uuid) -> Result<Vec<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(
+        "SELECT id, title, description, submitted_by, security_type, status, incident_report_id, created_at FROM external_reports WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(submitted_by)
+    .fetch_all(get_db())
+    .await
+}
