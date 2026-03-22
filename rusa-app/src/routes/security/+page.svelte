@@ -8,7 +8,7 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'incidents' | 'lostfound' | 'broadcasts' | 'findings' | 'tasks';
+  type Tab = 'incidents' | 'lostfound' | 'broadcasts' | 'findings' | 'tasks' | 'external_reports';
   let activeTab = $state<Tab>('incidents');
 
   let incidents: any[] = $state([]);
@@ -16,6 +16,7 @@
   let broadcasts: any[] = $state([]);
   let findings: any[] = $state([]);
   let securityTasks: any[] = $state([]);
+  let externalReports: any[] = $state([]);
   let allUsers: any[] = $state([]);
   let loading = $state(false);
 
@@ -46,6 +47,12 @@
   let findDesc = $state('');
   let findDate = $state('');
 
+  // External report form
+  let externalOpen = $state(false);
+  let exTitle = $state('');
+  let exDesc = $state('');
+  let exSecurityType = $state('');
+
   // Task assignment form (guardian/overseer)
   let taskOpen = $state(false);
   let taskAssignee = $state('');
@@ -63,6 +70,11 @@
   const isTaskManager = $derived(
     $session?.role_name === 'the_guardian' || $session?.role_name === 'the_overseer'
   );
+  const isSecurityStaff = $derived(
+    $session?.role_name === 'the_guardian' || $session?.role_name === 'the_overseer' ||
+    $session?.role_name === 'earth_security_head' || $session?.role_name === 'earth_security_staff' ||
+    $session?.role_name === 'galactic_security_head' || $session?.role_name === 'galactic_security_staff'
+  );
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -75,11 +87,12 @@
         securityApi.getBroadcastRequests(s.token),
         securityApi.getFindings(s.token),
         securityApi.getSecurityTasks(s.token),
+        securityApi.getExternalReports(s.token),
       ];
       if (isManager) promises.push(userApi.getAll(s.token));
       const results = await Promise.all(promises);
-      [incidents, lostFound, broadcasts, findings, securityTasks] = results as any[];
-      if (isManager) allUsers = results[5] as any[];
+      [incidents, lostFound, broadcasts, findings, securityTasks, externalReports] = results as any[];
+      if (isManager) allUsers = results[6] as any[];
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
@@ -155,6 +168,17 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitExternalReport() {
+    const s = $session; if (!s) return;
+    if (!exTitle || !exDesc) { showToast('Title and description required', 'error'); return; }
+    try {
+      await securityApi.submitExternalReport(s.token, exTitle, exDesc, exSecurityType || undefined);
+      showToast('External report submitted', 'success');
+      externalOpen = false; exTitle = ''; exDesc = ''; exSecurityType = '';
+      externalReports = await securityApi.getExternalReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   const incidentCols = [
     { key: 'title', label: 'Title' },
     { key: 'severity', label: 'Severity' },
@@ -181,11 +205,20 @@
     { key: 'status', label: 'Status' },
     { key: 'due_date', label: 'Due Date' },
   ];
+  const externalReportCols = [
+    { key: 'title', label: 'Title' },
+    { key: 'security_type', label: 'Security Type' },
+    { key: 'status', label: 'Status' },
+  ];
   const severityOpts = [
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
     { value: 'critical', label: 'Critical' },
+  ];
+  const securityTypeOpts = [
+    { value: 'earth', label: 'Earth Security' },
+    { value: 'galactic', label: 'Galactic Security' },
   ];
   let userOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
 
@@ -201,13 +234,14 @@
 
 <svelte:head><title>RUSA IMS — Security</title></svelte:head>
 
-<PageShell title="Security Operations" subtitle="Incident reports, lost & found, broadcasts, security findings, and tasks">
+<PageShell title="Security Operations" subtitle="Incident reports, lost & found, broadcasts, security findings, tasks, and external reports">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='incidents'} onclick={() => activeTab='incidents'}>Incidents</button>
     <button class="tab" class:active={activeTab==='lostfound'} onclick={() => activeTab='lostfound'}>Lost & Found</button>
     <button class="tab" class:active={activeTab==='broadcasts'} onclick={() => activeTab='broadcasts'}>Broadcasts</button>
     <button class="tab" class:active={activeTab==='findings'} onclick={() => activeTab='findings'}>Findings</button>
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
+    <button class="tab" class:active={activeTab==='external_reports'} onclick={() => activeTab='external_reports'}>External Reports</button>
   </div>
 
   {#if loading}
@@ -273,6 +307,17 @@
         </table>
       </div>
     {/if}
+  {:else if activeTab === 'external_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">External Reports</h2>
+      {#if !isSecurityStaff}
+        <button class="btn-primary" onclick={() => externalOpen = true}>+ Submit Report to Security</button>
+      {/if}
+    </div>
+    {#if isSecurityStaff}
+      <p class="info-hint">Reports submitted by non-security personnel appear here. Use these as the basis for official Incident Reports.</p>
+    {/if}
+    <Table columns={externalReportCols} rows={externalReports} />
   {/if}
 </PageShell>
 
@@ -323,6 +368,19 @@
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => findingsOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitFindings}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={externalOpen} title="Submit Report to Security">
+  <div class="form">
+    <p class="info-text">Use this form to report a finding or incident to the security team. Security staff will review your report and may create an official Incident Report.</p>
+    <Field label="Title" bind:value={exTitle} required />
+    <Field label="Description" type="textarea" bind:value={exDesc} required />
+    <Field label="Security Team" type="select" bind:value={exSecurityType} options={securityTypeOpts} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => externalOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitExternalReport}>Submit</button>
     </div>
   </div>
 </Modal>
@@ -383,6 +441,7 @@
   .loading { color: #4a5d82; padding: 2rem 0; }
   .empty { color: #4a5d82; padding: 1rem 0.75rem; text-align: center; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; }
+  .info-hint { font-size: 0.8rem; color: #4a5d82; font-style: italic; margin-bottom: 0.75rem; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }

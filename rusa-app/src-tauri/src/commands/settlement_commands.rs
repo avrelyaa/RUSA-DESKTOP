@@ -443,3 +443,124 @@ pub async fn get_farm_reports(token: String) -> Result<Vec<serde_json::Value>, S
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct TroublesomeSettlerReportRow {
+    id: Uuid,
+    reported_settler_id: Option<Uuid>,
+    reported_by: Option<Uuid>,
+    settlement_id: Option<Uuid>,
+    description: Option<String>,
+    status: Option<String>,
+    house_arrest_id: Option<Uuid>,
+    send_to_earth_id: Option<Uuid>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[tauri::command]
+pub async fn submit_troublesome_settler_report(
+    token: String,
+    reported_settler_id: String,
+    settlement_id: Option<String>,
+    description: String,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+
+    let settler = Uuid::parse_str(&reported_settler_id).map_err(|_| "Invalid settler ID".to_string())?;
+    let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO troublesome_settler_reports (reported_settler_id, reported_by, settlement_id, description, status) VALUES ($1,$2,$3,$4,'pending') RETURNING id"
+    )
+    .bind(settler).bind(session.user_id).bind(sid).bind(&description)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_TROUBLESOME_SETTLER_REPORT", Some("troublesome_settler_reports"), Some(row.0), None, Some(serde_json::json!({ "reported_settler_id": reported_settler_id }))).await;
+    Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_troublesome_settler_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    let rows = if session.role_name == "settler_commander" || session.tier >= 3 {
+        sqlx::query_as::<_, TroublesomeSettlerReportRow>(
+            "SELECT id, reported_settler_id, reported_by, settlement_id, description, status, house_arrest_id, send_to_earth_id, created_at FROM troublesome_settler_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetch_all(db::get_db()).await
+    } else {
+        sqlx::query_as::<_, TroublesomeSettlerReportRow>(
+            "SELECT id, reported_settler_id, reported_by, settlement_id, description, status, house_arrest_id, send_to_earth_id, created_at FROM troublesome_settler_reports WHERE reported_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        ).bind(session.user_id).fetch_all(db::get_db()).await
+    }.map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct CivilEngineerProgressReportRow {
+    id: Uuid,
+    task_id: Option<Uuid>,
+    settlement_id: Option<Uuid>,
+    title: String,
+    content: Option<String>,
+    materials_used: Option<serde_json::Value>,
+    progress_percentage: Option<i32>,
+    problems_encountered: Option<String>,
+    plans_next_steps: Option<String>,
+    submitted_by: Option<Uuid>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[tauri::command]
+pub async fn submit_civil_engineer_report(
+    token: String,
+    settlement_id: Option<String>,
+    task_id: Option<String>,
+    title: String,
+    content: String,
+    materials_used: Option<String>,
+    progress_percentage: Option<i32>,
+    problems_encountered: Option<String>,
+    plans_next_steps: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if session.role_name != "civil_engineer" && session.role_name != "settler_commander" {
+        return Err("Only civil engineers or the settler commander can submit civil engineer reports".to_string());
+    }
+
+    let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+    let tid = task_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+    let materials: Option<serde_json::Value> = materials_used
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok());
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO civil_engineer_progress_reports (task_id, settlement_id, title, content, materials_used, progress_percentage, problems_encountered, plans_next_steps, submitted_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id"
+    )
+    .bind(tid).bind(sid).bind(&title).bind(&content).bind(&materials).bind(progress_percentage).bind(&problems_encountered).bind(&plans_next_steps).bind(session.user_id)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_CIVIL_ENGINEER_REPORT", Some("civil_engineer_progress_reports"), Some(row.0), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(row.0.to_string())
+}
+
+#[tauri::command]
+pub async fn get_civil_engineer_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    let rows = if session.role_name == "civil_engineer" || session.role_name == "settler_commander" || session.tier >= 3 {
+        sqlx::query_as::<_, CivilEngineerProgressReportRow>(
+            "SELECT id, task_id, settlement_id, title, content, materials_used, progress_percentage, problems_encountered, plans_next_steps, submitted_by, created_at FROM civil_engineer_progress_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetch_all(db::get_db()).await
+    } else {
+        sqlx::query_as::<_, CivilEngineerProgressReportRow>(
+            "SELECT id, task_id, settlement_id, title, content, materials_used, progress_percentage, problems_encountered, plans_next_steps, submitted_by, created_at FROM civil_engineer_progress_reports WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        ).bind(session.user_id).fetch_all(db::get_db()).await
+    }.map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}

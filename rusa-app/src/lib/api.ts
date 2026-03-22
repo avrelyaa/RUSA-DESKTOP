@@ -89,6 +89,9 @@ export const securityApi = {
   getSecurityTasks: (token: string) => invoke<any[]>('get_security_tasks', { token }),
   updateSecurityTaskStatus: (token: string, taskId: string, status: string) =>
     invoke<void>('update_security_task_status', { token, taskId, status }),
+  submitExternalReport: (token: string, title: string, description: string, securityType?: string) =>
+    invoke<string>('submit_external_report', { token, title, description, securityType }),
+  getExternalReports: (token: string) => invoke<any[]>('get_external_reports', { token }),
 };
 
 // Astronautics
@@ -155,6 +158,12 @@ export const settlementApi = {
   getSupplyRequests: (token: string) => invoke<any[]>('get_supply_requests', { token }),
   getAnomalyReports: (token: string) => invoke<any[]>('get_anomaly_reports', { token }),
   getFarmReports: (token: string) => invoke<any[]>('get_farm_reports', { token }),
+  submitTroublesomeReport: (token: string, reportedSettlerId: string, description: string, settlementId?: string) =>
+    invoke<string>('submit_troublesome_settler_report', { token, reportedSettlerId, description, settlementId }),
+  getTroublesomeReports: (token: string) => invoke<any[]>('get_troublesome_settler_reports', { token }),
+  submitCivilEngineerReport: (token: string, title: string, content: string, settlementId?: string, taskId?: string, materialsUsed?: string, progressPercentage?: number, problemsEncountered?: string, plansNextSteps?: string) =>
+    invoke<string>('submit_civil_engineer_report', { token, title, content, settlementId, taskId, materialsUsed, progressPercentage, problemsEncountered, plansNextSteps }),
+  getCivilEngineerReports: (token: string) => invoke<any[]>('get_civil_engineer_reports', { token }),
 };
 
 // Space Station

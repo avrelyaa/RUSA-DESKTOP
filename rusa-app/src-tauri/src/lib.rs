@@ -71,6 +71,8 @@ pub fn run() {
             commands::security_commands::assign_security_task,
             commands::security_commands::get_security_tasks,
             commands::security_commands::update_security_task_status,
+            commands::security_commands::submit_external_report,
+            commands::security_commands::get_external_reports,
             // astronaut
             commands::astronaut_commands::get_missions,
             commands::astronaut_commands::create_mission,
@@ -109,6 +111,10 @@ pub fn run() {
             commands::settlement_commands::get_supply_requests,
             commands::settlement_commands::get_anomaly_reports,
             commands::settlement_commands::get_farm_reports,
+            commands::settlement_commands::submit_troublesome_settler_report,
+            commands::settlement_commands::get_troublesome_settler_reports,
+            commands::settlement_commands::submit_civil_engineer_report,
+            commands::settlement_commands::get_civil_engineer_reports,
             // aerospace
             commands::aerospace_commands::get_work_orders,
             commands::aerospace_commands::create_work_order,

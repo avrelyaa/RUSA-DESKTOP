@@ -299,3 +299,41 @@ pub async fn update_security_task_status(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn submit_external_report(
+    token: String,
+    title: String,
+    description: String,
+    security_type: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+
+    let security_roles = ["the_guardian", "the_overseer", "earth_security_head", "earth_security_staff", "galactic_security_head", "galactic_security_staff"];
+    if security_roles.contains(&session.role_name.as_str()) {
+        return Err("Security personnel cannot submit external reports. Use incident reports instead.".to_string());
+    }
+
+    let id = security_queries::insert_external_report(
+        &title,
+        &description,
+        session.user_id,
+        security_type.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_EXTERNAL_REPORT", Some("external_reports"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn get_external_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = security_queries::get_all_external_reports()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}

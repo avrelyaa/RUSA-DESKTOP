@@ -8,7 +8,7 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'tasks' | 'nomad_tasks' | 'supply' | 'anomalies' | 'farm_reports';
+  type Tab = 'tasks' | 'nomad_tasks' | 'supply' | 'anomalies' | 'farm_reports' | 'troublesome_reports' | 'civil_reports';
   let activeTab = $state<Tab>('tasks');
 
   let tasks: any[] = $state([]);
@@ -16,6 +16,8 @@
   let supplyReqs: any[] = $state([]);
   let anomalies: any[] = $state([]);
   let farmReports: any[] = $state([]);
+  let troublesomeReports: any[] = $state([]);
+  let civilReports: any[] = $state([]);
   let loading = $state(false);
 
   // Task form
@@ -53,7 +55,23 @@
   let fCropStatus = $state('');
   let fHealthNotes = $state('');
 
+  // Troublesome settler report form
+  let troublesomeOpen = $state(false);
+  let trSettlerSearch = $state('');
+  let trSettlerSelected: any = $state(null);
+  let trDesc = $state('');
+
+  // Civil engineer report form
+  let civilOpen = $state(false);
+  let ciTitle = $state('');
+  let ciContent = $state('');
+  let ciMaterials = $state('');
+  let ciProgress = $state<number | undefined>(undefined);
+  let ciProblems = $state('');
+  let ciPlans = $state('');
+
   const isCommander = $derived($session?.role_name === 'settler_commander');
+  const isCivilEngineer = $derived($session?.role_name === 'civil_engineer');
 
   function filteredAssignees(search: string): any[] {
     const q = search.toLowerCase();
@@ -63,17 +81,20 @@
   }
 
   let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
+  let trSettlerSuggestions = $derived(trSettlerSearch.length > 0 ? filteredAssignees(trSettlerSearch) : []);
 
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, nomadTasks, supplyReqs, anomalies, farmReports] = await Promise.all([
+      [tasks, nomadTasks, supplyReqs, anomalies, farmReports, troublesomeReports, civilReports] = await Promise.all([
         settlementApi.getTasks(s.token),
         governanceApi.getNomadTasks(s.token),
         settlementApi.getSupplyRequests(s.token),
         settlementApi.getAnomalyReports(s.token),
         settlementApi.getFarmReports(s.token),
+        settlementApi.getTroublesomeReports(s.token),
+        settlementApi.getCivilEngineerReports(s.token),
       ]);
       allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
@@ -138,6 +159,33 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitTroublesomeReport() {
+    const s = $session; if (!s) return;
+    if (!trSettlerSelected || !trDesc) { showToast('Settler and description required', 'error'); return; }
+    try {
+      await settlementApi.submitTroublesomeReport(s.token, trSettlerSelected.id, trDesc);
+      showToast('Troublesome settler report submitted', 'success');
+      troublesomeOpen = false; trSettlerSelected = null; trSettlerSearch = ''; trDesc = '';
+      troublesomeReports = await settlementApi.getTroublesomeReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitCivilReport() {
+    const s = $session; if (!s) return;
+    if (!ciTitle || !ciContent) { showToast('Title and content required', 'error'); return; }
+    let materialsJson: string | undefined;
+    if (ciMaterials.trim()) {
+      const lines = ciMaterials.split('\n').map(l => l.trim()).filter(Boolean);
+      materialsJson = JSON.stringify(lines);
+    }
+    try {
+      await settlementApi.submitCivilEngineerReport(s.token, ciTitle, ciContent, undefined, undefined, materialsJson, ciProgress, ciProblems || undefined, ciPlans || undefined);
+      showToast('Civil engineer report submitted', 'success');
+      civilOpen = false; ciTitle = ''; ciContent = ''; ciMaterials = ''; ciProgress = undefined; ciProblems = ''; ciPlans = '';
+      civilReports = await settlementApi.getCivilEngineerReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
@@ -170,7 +218,7 @@
 
 <svelte:head><title>RUSA IMS — Settlement Operations</title></svelte:head>
 
-<PageShell title="Settlement Operations" subtitle="Task management, supply requests, and anomaly reports">
+<PageShell title="Settlement Operations" subtitle="Task management, supply requests, anomaly reports, and disciplinary actions">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
     {#if isCommander}
@@ -180,6 +228,10 @@
     <button class="tab" class:active={activeTab==='anomalies'} onclick={() => activeTab='anomalies'}>Anomaly Reports</button>
     {#if $session?.role_name === 'farmer' || $session?.role_name === 'settler_commander'}
       <button class="tab" class:active={activeTab==='farm_reports'} onclick={() => activeTab='farm_reports'}>Farm Reports</button>
+    {/if}
+    <button class="tab" class:active={activeTab==='troublesome_reports'} onclick={() => activeTab='troublesome_reports'}>Troublesome Settlers</button>
+    {#if isCivilEngineer || isCommander}
+      <button class="tab" class:active={activeTab==='civil_reports'} onclick={() => activeTab='civil_reports'}>Civil Engineer Reports</button>
     {/if}
   </div>
 
@@ -243,6 +295,23 @@
       {/if}
     </div>
     <Table columns={[{key:'title',label:'Title'},{key:'crop_status',label:'Crop Status'},{key:'created_at',label:'Created At'}]} rows={farmReports} />
+  {:else if activeTab === 'troublesome_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Troublesome Settler Reports</h2>
+      <button class="btn-primary" onclick={() => troublesomeOpen = true}>+ Report Troublesome Settler</button>
+    </div>
+    {#if isCommander}
+      <p class="info-hint">As Settler Commander, you can view all reports and issue house arrests or deportation requests as follow-up actions.</p>
+    {/if}
+    <Table columns={[{key:'description',label:'Description'},{key:'status',label:'Status'},{key:'created_at',label:'Reported At'}]} rows={troublesomeReports} />
+  {:else if activeTab === 'civil_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Civil Engineer Progress Reports</h2>
+      {#if isCivilEngineer || isCommander}
+        <button class="btn-primary" onclick={() => civilOpen = true}>+ Submit Progress Report</button>
+      {/if}
+    </div>
+    <Table columns={[{key:'title',label:'Title'},{key:'progress_percentage',label:'Progress %'},{key:'created_at',label:'Submitted At'}]} rows={civilReports} />
   {/if}
 </PageShell>
 
@@ -325,14 +394,63 @@
   </div>
 </Modal>
 
+<Modal bind:open={troublesomeOpen} title="Report Troublesome Settler">
+  <div class="form">
+    <p class="info-text">Report a settler who is causing trouble to the Settler Commander. The Commander may place them on house arrest and request deportation.</p>
+    <div class="field">
+      <label class="field-label">Settler to Report</label>
+      <div class="assignee-autocomplete">
+        {#if trSettlerSelected}
+          <span class="token">{trSettlerSelected.full_name || trSettlerSelected.username}<button class="token-remove" onclick={() => { trSettlerSelected = null; trSettlerSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={trSettlerSearch} placeholder="Search by name or username…" />
+            {#if trSettlerSuggestions.length > 0}
+              <div class="suggestions">
+                {#each trSettlerSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { trSettlerSelected = u; trSettlerSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+    <Field label="Description" type="textarea" bind:value={trDesc} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => { troublesomeOpen = false; trSettlerSelected = null; trSettlerSearch = ''; trDesc = ''; }}>Cancel</button>
+      <button class="btn-primary" onclick={submitTroublesomeReport}>Submit Report</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={civilOpen} title="Civil Engineer Progress Report">
+  <div class="form">
+    <Field label="Title" bind:value={ciTitle} required />
+    <Field label="Description of Work Done" type="textarea" bind:value={ciContent} required />
+    <Field label="Materials Used" type="textarea" bind:value={ciMaterials} hint="List each material on a new line (e.g. Steel beams, Concrete, Glass panels)" />
+    <div class="field">
+      <label class="field-label">Progress Percentage</label>
+      <input class="field-input" type="number" min="0" max="100" bind:value={ciProgress} placeholder="0–100" />
+    </div>
+    <Field label="Problems Encountered" type="textarea" bind:value={ciProblems} />
+    <Field label="Plans for Next Steps" type="textarea" bind:value={ciPlans} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => civilOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitCivilReport}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
   .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
   .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .section-title { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .loading { color: #4a5d82; padding: 2rem 0; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; }
+  .info-hint { font-size: 0.8rem; color: #4a5d82; font-style: italic; margin-bottom: 0.75rem; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
@@ -352,6 +470,8 @@
   .badge-cancelled { background: rgba(255,68,102,0.12); color: #ff4466; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
+  .field-input:focus { border-color: #3d7fff; outline: none; }
   .assignee-autocomplete { position: relative; }
   .autocomplete-wrap { position: relative; }
   .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
@@ -363,4 +483,3 @@
   .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
   .token-remove:hover { color: #ff4466; }
 </style>
-
