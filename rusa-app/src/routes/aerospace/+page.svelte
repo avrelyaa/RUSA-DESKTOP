@@ -8,10 +8,11 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'work_orders' | 'technical_reports';
+  type Tab = 'work_orders' | 'assigned_tasks' | 'technical_reports';
   let activeTab = $state<Tab>('work_orders');
 
   let workOrders: any[] = $state([]);
+  let assignedTasks: any[] = $state([]);
   let technicalReports: any[] = $state([]);
   let loading = $state(false);
 
@@ -22,11 +23,24 @@
   let woPriority = $state('medium');
   let woSystem = $state('');
 
-  // Update status form
+  // Update work order status form
   let statusOpen = $state(false);
   let selectedOrderId = $state('');
   let newStatus = $state('open');
   let statusNotes = $state('');
+
+  // Assign task form (manager/director)
+  let assignOpen = $state(false);
+  let aAssignee = $state('');
+  let aTitle = $state('');
+  let aDesc = $state('');
+  let aDue = $state('');
+
+  // Update assigned task status
+  let taskStatusOpen = $state(false);
+  let selectedTask: any = $state(null);
+  let taskStatus = $state('pending');
+  let taskProgressNotes = $state('');
 
   // Technical report form
   let reportOpen = $state(false);
@@ -35,12 +49,15 @@
   let rFindings = $state('');
   let rRecommendations = $state('');
 
+  const canAssignTasks = $derived(($session?.tier ?? 0) >= 2);
+
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [workOrders, technicalReports] = await Promise.all([
+      [workOrders, assignedTasks, technicalReports] = await Promise.all([
         aerospaceApi.getWorkOrders(s.token),
+        aerospaceApi.getAssignedTasks(s.token),
         aerospaceApi.getTechnicalReports(s.token),
       ]);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
@@ -75,6 +92,34 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function assignTask() {
+    const s = $session; if (!s) return;
+    if (!aAssignee || !aTitle) { showToast('Assignee and title required', 'error'); return; }
+    try {
+      await aerospaceApi.assignTask(s.token, aAssignee, aTitle, aDesc || undefined, aDue || undefined);
+      showToast('Task assigned', 'success');
+      assignOpen = false; aAssignee = ''; aTitle = ''; aDesc = ''; aDue = '';
+      assignedTasks = await aerospaceApi.getAssignedTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openTaskStatusModal(task: any) {
+    selectedTask = task;
+    taskStatus = task.status ?? 'pending';
+    taskProgressNotes = task.progress_notes ?? '';
+    taskStatusOpen = true;
+  }
+
+  async function updateTaskStatus() {
+    const s = $session; if (!s || !selectedTask) return;
+    try {
+      await aerospaceApi.updateTaskStatus(s.token, selectedTask.id, taskStatus, taskProgressNotes || undefined);
+      showToast('Task updated', 'success');
+      taskStatusOpen = false;
+      assignedTasks = await aerospaceApi.getAssignedTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   async function submitReport() {
     const s = $session; if (!s) return;
     if (!rTitle || !rContent) { showToast('Title and content required', 'error'); return; }
@@ -90,6 +135,7 @@
     switch (status) {
       case 'open': return 'badge badge-open';
       case 'in_progress': return 'badge badge-progress';
+      case 'pending': return 'badge badge-open';
       case 'completed': return 'badge badge-done';
       case 'cancelled': return 'badge badge-cancelled';
       default: return 'badge';
@@ -108,13 +154,28 @@
     { value: 'completed', label: 'Completed' },
     { value: 'cancelled', label: 'Cancelled' },
   ];
+  const taskStatusOpts = [
+    { value: 'pending', label: 'Pending' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'cancelled', label: 'Cancelled' },
+  ];
+  const taskCols = [
+    { key: 'title', label: 'Title' },
+    { key: 'status', label: 'Status' },
+    { key: 'due_date', label: 'Due Date' },
+    { key: 'progress_notes', label: 'Progress Notes' },
+  ];
 </script>
 
 <svelte:head><title>RUSA IMS — Aerospace Engineering</title></svelte:head>
 
-<PageShell title="Aerospace Engineering" subtitle="Work orders and technical reports">
+<PageShell title="Aerospace Engineering" subtitle="Work orders, assigned tasks, and technical reports">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='work_orders'} onclick={() => activeTab='work_orders'}>Work Orders</button>
+    <button class="tab" class:active={activeTab==='assigned_tasks'} onclick={() => activeTab='assigned_tasks'}>
+      {canAssignTasks ? 'Assigned Tasks' : 'My Assigned Tasks'}
+    </button>
     <button class="tab" class:active={activeTab==='technical_reports'} onclick={() => activeTab='technical_reports'}>Technical Reports</button>
   </div>
 
@@ -158,6 +219,45 @@
         </tbody>
       </table>
     </div>
+
+  {:else if activeTab === 'assigned_tasks'}
+    <div class="section-bar">
+      <h2 class="section-title">{canAssignTasks ? 'Tasks I Assigned' : 'My Assigned Tasks'}</h2>
+      {#if canAssignTasks}
+        <button class="btn-primary" onclick={() => assignOpen = true}>+ Assign Task</button>
+      {/if}
+    </div>
+    {#if assignedTasks.length === 0}
+      <p class="empty">{canAssignTasks ? 'No tasks assigned yet.' : 'No tasks have been assigned to you.'}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Due Date</th>
+              <th>Progress Notes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each assignedTasks as task}
+              <tr>
+                <td>{task.title}</td>
+                <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
+                <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                <td>{task.progress_notes ?? '—'}</td>
+                <td>
+                  <button class="btn-small" onclick={() => openTaskStatusModal(task)}>Update</button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+
   {:else if activeTab === 'technical_reports'}
     <div class="section-bar">
       <h2 class="section-title">Technical Reports</h2>
@@ -214,6 +314,31 @@
   </div>
 </Modal>
 
+<Modal bind:open={assignOpen} title="Assign Aerospace Task">
+  <div class="form">
+    <Field label="Assign To (User ID)" bind:value={aAssignee} required />
+    <Field label="Title" bind:value={aTitle} required />
+    <Field label="Description" type="textarea" bind:value={aDesc} />
+    <Field label="Due Date" type="datetime-local" bind:value={aDue} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => assignOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={assignTask}>Assign</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={taskStatusOpen} title="Update Task Status">
+  <div class="form">
+    <p class="info-text">Task: <strong>{selectedTask?.title}</strong></p>
+    <Field label="Status" type="select" bind:value={taskStatus} options={taskStatusOpts} />
+    <Field label="Progress Notes" type="textarea" bind:value={taskProgressNotes} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => taskStatusOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={updateTaskStatus}>Update</button>
+    </div>
+  </div>
+</Modal>
+
 <Modal bind:open={reportOpen} title="Submit Technical Report">
   <div class="form">
     <Field label="Title" bind:value={rTitle} required />
@@ -234,6 +359,7 @@
   .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .section-title { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .loading { color: #4a5d82; padding: 2rem 0; }
+  .info-text { font-size: 0.85rem; color: #8fa3cc; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
