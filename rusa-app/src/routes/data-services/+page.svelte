@@ -163,7 +163,7 @@
 
   // ---- Analysis tools ----
   function downloadResponse(req: any) {
-    const filename = req.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_response.txt';
+    const filename = req.title.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 80) + '_response.txt';
     const lines: string[] = [];
     lines.push('DATA REQUEST RESPONSE');
     lines.push('=====================');
