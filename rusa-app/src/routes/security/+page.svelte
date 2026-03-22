@@ -52,6 +52,8 @@
   let taskTitle = $state('');
   let taskDesc = $state('');
   let taskDue = $state('');
+  let taskAssigneeSearch = $state('');
+  let taskAssigneeSelected: any = $state(null);
 
   // Task status update form (security staff)
   let taskStatusOpen = $state(false);
@@ -84,11 +86,11 @@
 
   async function assignTask() {
     const s = $session; if (!s) return;
-    if (!taskAssignee || !taskTitle) { showToast('Assignee and title required', 'error'); return; }
+    if (!taskAssigneeSelected || !taskTitle) { showToast('Assignee and title required', 'error'); return; }
     try {
-      await securityApi.assignTask(s.token, taskAssignee, taskTitle, taskDesc || undefined, taskDue || undefined);
+      await securityApi.assignTask(s.token, taskAssigneeSelected.id, taskTitle, taskDesc || undefined, taskDue || undefined);
       showToast('Task assigned', 'success');
-      taskOpen = false; taskAssignee = ''; taskTitle = ''; taskDesc = ''; taskDue = '';
+      taskOpen = false; taskAssigneeSelected = null; taskAssigneeSearch = ''; taskTitle = ''; taskDesc = ''; taskDue = '';
       securityTasks = await securityApi.getSecurityTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -186,6 +188,15 @@
     { value: 'critical', label: 'Critical' },
   ];
   let userOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
+
+  function filteredSecurityAssignees(search: string): any[] {
+    const q = search.toLowerCase();
+    return allUsers.filter((u: any) =>
+      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
+    ).slice(0, 8);
+  }
+
+  let taskAssigneeSuggestions = $derived(taskAssigneeSearch.length > 0 ? filteredSecurityAssignees(taskAssigneeSearch) : []);
 </script>
 
 <svelte:head><title>RUSA IMS — Security</title></svelte:head>
@@ -318,12 +329,30 @@
 
 <Modal bind:open={taskOpen} title="Assign Security Task">
   <div class="form">
-    <Field label="Assign To" type="select" bind:value={taskAssignee} options={userOptions} required />
+    <div class="field">
+      <label class="field-label">Assign To</label>
+      <div class="assignee-autocomplete">
+        {#if taskAssigneeSelected}
+          <span class="token">{taskAssigneeSelected.full_name || taskAssigneeSelected.username}<button class="token-remove" onclick={() => { taskAssigneeSelected = null; taskAssigneeSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={taskAssigneeSearch} placeholder="Search by name or username…" />
+            {#if taskAssigneeSuggestions.length > 0}
+              <div class="suggestions">
+                {#each taskAssigneeSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { taskAssigneeSelected = u; taskAssigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
     <Field label="Task Title" bind:value={taskTitle} required />
     <Field label="Description" type="textarea" bind:value={taskDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={taskDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => taskOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { taskOpen = false; taskAssigneeSelected = null; taskAssigneeSearch = ''; }}>Cancel</button>
       <button class="btn-primary" onclick={assignTask}>Assign</button>
     </div>
   </div>
@@ -369,4 +398,16 @@
   .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
   .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
   .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .assignee-autocomplete { position: relative; }
+  .autocomplete-wrap { position: relative; }
+  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
+  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
+  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
+  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
+  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
+  .token-remove:hover { color: #ff4466; }
 </style>

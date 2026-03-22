@@ -4,7 +4,7 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { researchTaskApi } from '$lib/api';
+  import { researchTaskApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
@@ -16,6 +16,9 @@
   let aTitle = $state('');
   let aDesc = $state('');
   let aAssignTo = $state('');
+  let allUsers: any[] = $state([]);
+  let assigneeSearch = $state('');
+  let assigneeSelected: any = $state(null);
   let aSourceMsg = $state('');
   let aDueDate = $state('');
 
@@ -27,6 +30,15 @@
   const isDirector = $derived(
     $session?.role_name === 'the_observer' || $session?.role_name === 'the_artificer' || $session?.role_name === 'the_taskmaster'
   );
+
+  function filteredAssignees(search: string): any[] {
+    const q = search.toLowerCase();
+    return allUsers.filter(u =>
+      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
+    ).slice(0, 8);
+  }
+
+  let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
 
   const taskCols = [
     { key: 'title', label: 'Title' },
@@ -41,6 +53,7 @@
     loading = true;
     try {
       tasks = await researchTaskApi.getTasks(s.token);
+      allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load tasks: ' + e, 'error'); }
     loading = false;
   });
@@ -49,9 +62,9 @@
     const s = $session; if (!s) return;
     if (!aTitle) { showToast('Title required', 'error'); return; }
     try {
-      await researchTaskApi.assign(s.token, aTitle, aDesc || undefined, aAssignTo || undefined, aSourceMsg || undefined, aDueDate || undefined);
+      await researchTaskApi.assign(s.token, aTitle, aDesc || undefined, assigneeSelected?.id || undefined, aSourceMsg || undefined, aDueDate || undefined);
       showToast('Task assigned', 'success');
-      assignOpen = false; aTitle = ''; aDesc = ''; aAssignTo = ''; aSourceMsg = ''; aDueDate = '';
+      assignOpen = false; aTitle = ''; aDesc = ''; assigneeSelected = null; assigneeSearch = ''; aSourceMsg = ''; aDueDate = '';
       tasks = await researchTaskApi.getTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -121,11 +134,29 @@
   <div class="form">
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
-    <Field label="Assign To (User ID)" bind:value={aAssignTo} />
+    <div class="field">
+      <label class="field-label">Assign To (optional)</label>
+      <div class="assignee-autocomplete">
+        {#if assigneeSelected}
+          <span class="token">{assigneeSelected.full_name || assigneeSelected.username}<button class="token-remove" onclick={() => { assigneeSelected = null; assigneeSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={assigneeSearch} placeholder="Search by name or username…" />
+            {#if assigneeSuggestions.length > 0}
+              <div class="suggestions">
+                {#each assigneeSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { assigneeSelected = u; assigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
     <Field label="Source Message ID" bind:value={aSourceMsg} placeholder="Paste the message ID from the help request" />
     <Field label="Due Date" type="date" bind:value={aDueDate} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => assignOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { assignOpen = false; assigneeSelected = null; assigneeSearch = ''; }}>Cancel</button>
       <button class="btn-primary" onclick={assignTask}>Assign</button>
     </div>
   </div>
@@ -151,5 +182,17 @@
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-action { background: none; border: 1px solid #3d7fff; border-radius: 4px; color: #3d7fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.06em; padding: 0.25rem 0.75rem; }
   .btn-action:hover { background: #3d7fff22; }
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .assignee-autocomplete { position: relative; }
+  .autocomplete-wrap { position: relative; }
+  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
+  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
+  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
+  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
+  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
+  .token-remove:hover { color: #ff4466; }
 </style>
 

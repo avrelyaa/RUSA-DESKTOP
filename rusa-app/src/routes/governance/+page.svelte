@@ -66,6 +66,8 @@
   let ntTitle = $state('');
   let ntDesc = $state('');
   let ntDue = $state('');
+  let ntSearch = $state('');
+  let ntSelected: any = $state(null);
 
   // Librarian form
   let librarianOpen = $state(false);
@@ -180,11 +182,11 @@
 
   async function nomadAssignTask() {
     const s = $session; if (!s) return;
-    if (!ntAssignee || !ntTitle) { showToast('Assignee and title required', 'error'); return; }
+    if (!ntSelected || !ntTitle) { showToast('Assignee and title required', 'error'); return; }
     try {
-      await governanceApi.nomadAssignTask(s.token, ntAssignee, ntTitle, ntDesc || undefined, ntDue || undefined);
+      await governanceApi.nomadAssignTask(s.token, ntSelected.id, ntTitle, ntDesc || undefined, ntDue || undefined);
       showToast('Task assigned', 'success');
-      nomadTaskOpen = false; ntAssignee = ''; ntTitle = ''; ntDesc = ''; ntDue = '';
+      nomadTaskOpen = false; ntSelected = null; ntSearch = ''; ntTitle = ''; ntDesc = ''; ntDue = '';
       nomadTasks = await governanceApi.getNomadTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -294,6 +296,17 @@
       .filter((u: any) => u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary')
       .map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` }))
   );
+
+  function filteredNomadTargets(search: string): any[] {
+    const q = search.toLowerCase();
+    return allUsers.filter((u: any) =>
+      (u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary') &&
+      (u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q))
+    ).slice(0, 8);
+  }
+
+  let ntSuggestions = $derived(ntSearch.length > 0 ? filteredNomadTargets(ntSearch) : []);
+
   let staffOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
   let roleOptions = $derived(allRoles.map((r: any) => ({ value: r.name, label: r.display_name || r.name })));
 </script>
@@ -465,12 +478,30 @@
 
 <Modal bind:open={nomadTaskOpen} title="Assign Task">
   <div class="form">
-    <Field label="Assign To (Settler Commander or Head of Sanitary)" type="select" bind:value={ntAssignee} options={nomadTargetOptions} required />
+    <div class="field">
+      <label class="field-label">Assign To (Settler Commander or Head of Sanitary)</label>
+      <div class="assignee-autocomplete">
+        {#if ntSelected}
+          <span class="token">{ntSelected.full_name || ntSelected.username}<button class="token-remove" onclick={() => { ntSelected = null; ntSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={ntSearch} placeholder="Search by name or username…" />
+            {#if ntSuggestions.length > 0}
+              <div class="suggestions">
+                {#each ntSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { ntSelected = u; ntSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
     <Field label="Task Title" bind:value={ntTitle} required />
     <Field label="Description" type="textarea" bind:value={ntDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={ntDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => nomadTaskOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { nomadTaskOpen = false; ntSelected = null; ntSearch = ''; }}>Cancel</button>
       <button class="btn-primary" onclick={nomadAssignTask}>Assign</button>
     </div>
   </div>
@@ -522,4 +553,16 @@
   .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
   .vote-timer { font-size: 0.82rem; color: #8fa3cc; margin: 0; }
   .director-card { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.5rem; max-width: 500px; }
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .assignee-autocomplete { position: relative; }
+  .autocomplete-wrap { position: relative; }
+  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
+  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
+  .suggestion-item:last-child { border-bottom: none; }
+  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
+  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
+  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
+  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
+  .token-remove:hover { color: #ff4466; }
 </style>
