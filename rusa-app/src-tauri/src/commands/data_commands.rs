@@ -159,6 +159,34 @@ pub async fn analyst_reject_request(
     Ok(())
 }
 
+// Retrieve delivered requests visible to the caller:
+// - the_statistician: sees all delivered requests
+// - others: see only their own delivered requests
+// - data_analyst: not permitted (their role ends at submission)
+#[tauri::command]
+pub async fn get_delivered_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    if session.role_name == "data_analyst" {
+        return Err("Access denied: data analysts cannot access delivered requests".to_string());
+    }
+
+    let rows = if session.role_name == "the_statistician" {
+        data_queries::get_all_data_requests()
+            .await
+            .map_err(|e| format!("DB error: {}", e))?
+            .into_iter()
+            .filter(|r| r.status.as_deref() == Some("delivered"))
+            .collect::<Vec<_>>()
+    } else {
+        data_queries::get_delivered_requests_for_user(session.user_id)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?
+    };
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
 // Step 4: The Statistician delivers to requester after final review
 #[tauri::command]
 pub async fn deliver_data_response(

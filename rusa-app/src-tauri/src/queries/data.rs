@@ -135,6 +135,17 @@ pub async fn update_data_request_delivered(request_id: Uuid) -> Result<(), sqlx:
     Ok(())
 }
 
+pub async fn get_delivered_requests_for_user(
+    user_id: Uuid,
+) -> Result<Vec<DataRequestRow>, sqlx::Error> {
+    sqlx::query_as::<_, DataRequestRow>(
+        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, analyst_rejection_reason, assigned_to, delivered_at, created_at FROM data_requests WHERE status = 'delivered' AND requested_by = $1 AND deleted_at IS NULL ORDER BY delivered_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(get_db())
+    .await
+}
+
 pub async fn update_data_request_analyst_rejection(
     request_id: Uuid,
     rejection_reason: &str,
