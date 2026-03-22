@@ -139,9 +139,6 @@ pub fn run() {
             commands::psychiatry_commands::complete_appointment,
             commands::psychiatry_commands::add_recovery_log,
             commands::psychiatry_commands::get_recovery_log,
-            commands::psychiatry_commands::assign_psychiatry_task,
-            commands::psychiatry_commands::get_psychiatry_tasks,
-            commands::psychiatry_commands::update_psychiatry_task_status,
             // medical
             commands::medical_commands::allocate_shift,
             commands::medical_commands::get_shifts,
@@ -153,9 +150,6 @@ pub fn run() {
             commands::medical_commands::get_staff_specializations,
             commands::medical_commands::submit_budget_request,
             commands::medical_commands::submit_expenditure_report,
-            commands::medical_commands::assign_medical_task,
-            commands::medical_commands::get_medical_tasks,
-            commands::medical_commands::update_medical_task_status,
             // sanitary
             commands::sanitary_commands::get_sanitary_tasks,
             commands::sanitary_commands::assign_sanitary_task,

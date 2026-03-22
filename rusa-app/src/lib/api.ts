@@ -192,11 +192,6 @@ export const psychiatryApi = {
   addRecoveryLog: (token: string, patientId: string, entryDate: string, status: string, notes?: string) =>
     invoke<string>('add_recovery_log', { token, patientId, entryDate, status, notes }),
   getRecoveryLog: (token: string, patientId: string) => invoke<any[]>('get_recovery_log', { token, patientId }),
-  assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
-    invoke<string>('assign_psychiatry_task', { token, assignedTo, title, description, dueDate }),
-  getTasks: (token: string) => invoke<any[]>('get_psychiatry_tasks', { token }),
-  updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
-    invoke<void>('update_psychiatry_task_status', { token, taskId, status, progressNotes }),
 };
 
 // Medical
@@ -217,11 +212,6 @@ export const medicalApi = {
     invoke<string>('submit_budget_request', { token, title, description, amount, items }),
   submitExpenditure: (token: string, title: string, description: string, totalAmount: number, items?: string, invoiceData?: string) =>
     invoke<string>('submit_expenditure_report', { token, title, description, totalAmount, items, invoiceData }),
-  assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
-    invoke<string>('assign_medical_task', { token, assignedTo, title, description, dueDate }),
-  getTasks: (token: string) => invoke<any[]>('get_medical_tasks', { token }),
-  updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
-    invoke<void>('update_medical_task_status', { token, taskId, status, progressNotes }),
 };
 
 // Sanitary
