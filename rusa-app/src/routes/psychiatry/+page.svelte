@@ -4,16 +4,15 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { psychiatryApi, userApi } from '$lib/api';
+  import { psychiatryApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'patients' | 'appointments' | 'tasks';
+  type Tab = 'patients' | 'appointments';
   let activeTab = $state<Tab>('patients');
 
   let patients: any[] = $state([]);
   let appointments: any[] = $state([]);
-  let tasks: any[] = $state([]);
   let loading = $state(false);
 
   // Register patient
@@ -30,44 +29,14 @@
   let selectedAppt: any = $state(null);
   let findings = $state('');
 
-  // Assign task form
-  let taskOpen = $state(false);
-  let tAssignee = $state('');
-  let tTitle = $state('');
-  let tDesc = $state('');
-  let tDue = $state('');
-
-  let allUsers: any[] = $state([]);
-  let assigneeSearch = $state('');
-  let assigneeSelected: any = $state(null);
-
-  // Update task status form
-  let taskStatusOpen = $state(false);
-  let selectedTask: any = $state(null);
-  let taskStatus = $state('pending');
-  let taskProgressNotes = $state('');
-
-  const isPsychiatrist = $derived($session?.role_name === 'psychiatrist');
-
-  function filteredAssignees(search: string): any[] {
-    const q = search.toLowerCase();
-    return allUsers.filter(u =>
-      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
-    ).slice(0, 8);
-  }
-
-  let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
-
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [patients, appointments, tasks] = await Promise.all([
+      [patients, appointments] = await Promise.all([
         psychiatryApi.getPatients(s.token),
         psychiatryApi.getAppointments(s.token),
-        psychiatryApi.getTasks(s.token),
       ]);
-      allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
@@ -104,44 +73,6 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
-  async function assignTask() {
-    const s = $session; if (!s) return;
-    if (!assigneeSelected || !tTitle) { showToast('Assignee and title required', 'error'); return; }
-    try {
-      await psychiatryApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDue || undefined);
-      showToast('Task assigned', 'success');
-      taskOpen = false; assigneeSelected = null; assigneeSearch = ''; tTitle = ''; tDesc = ''; tDue = '';
-      tasks = await psychiatryApi.getTasks(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  function openTaskStatusModal(task: any) {
-    selectedTask = task;
-    taskStatus = task.status ?? 'pending';
-    taskProgressNotes = task.progress_notes ?? '';
-    taskStatusOpen = true;
-  }
-
-  async function updateTaskStatus() {
-    const s = $session; if (!s || !selectedTask) return;
-    try {
-      await psychiatryApi.updateTaskStatus(s.token, selectedTask.id, taskStatus, taskProgressNotes || undefined);
-      showToast('Task updated', 'success');
-      taskStatusOpen = false;
-      tasks = await psychiatryApi.getTasks(s.token);
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  function statusBadgeClass(status: string | null | undefined): string {
-    switch (status) {
-      case 'pending': return 'badge badge-open';
-      case 'in_progress': return 'badge badge-progress';
-      case 'completed': return 'badge badge-done';
-      case 'cancelled': return 'badge badge-cancelled';
-      default: return 'badge';
-    }
-  }
-
   const patientCols = [
     { key: 'patient_name', label: 'Patient' },
     { key: 'registered_at', label: 'Registered' },
@@ -152,21 +83,14 @@
     { key: 'scheduled_at', label: 'Scheduled' },
     { key: 'status', label: 'Status' },
   ];
-  const taskStatusOpts = [
-    { value: 'pending', label: 'Pending' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'cancelled', label: 'Cancelled' },
-  ];
 </script>
 
 <svelte:head><title>RUSA IMS — Psychiatry</title></svelte:head>
 
-<PageShell title="Psychiatry" subtitle="Patient management, appointments, and task assignments">
+<PageShell title="Psychiatry" subtitle="Patient management and appointments">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='patients'} onclick={() => activeTab='patients'}>Patients</button>
     <button class="tab" class:active={activeTab==='appointments'} onclick={() => activeTab='appointments'}>Appointments</button>
-    <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>{isPsychiatrist ? 'Tasks' : 'My Tasks'}</button>
   </div>
 
   {#if loading}
@@ -183,43 +107,6 @@
       <button class="btn-primary" onclick={() => apptOpen = true}>+ Schedule Appointment</button>
     </div>
     <Table columns={apptCols} rows={appointments} onRowClick={(r) => { selectedAppt = r; findings = ''; completeOpen = true; }} />
-  {:else if activeTab === 'tasks'}
-    <div class="section-bar">
-      <h2 class="section-title">{isPsychiatrist ? 'Tasks I Assigned' : 'My Assigned Tasks'}</h2>
-      {#if isPsychiatrist}
-        <button class="btn-primary" onclick={() => taskOpen = true}>+ Assign Task</button>
-      {/if}
-    </div>
-    {#if tasks.length === 0}
-      <p class="empty">{isPsychiatrist ? 'No tasks assigned yet.' : 'No tasks have been assigned to you.'}</p>
-    {:else}
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Due Date</th>
-              <th>Progress Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each tasks as task}
-              <tr>
-                <td>{task.title}</td>
-                <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
-                <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
-                <td>{task.progress_notes ?? '—'}</td>
-                <td>
-                  <button class="btn-small" onclick={() => openTaskStatusModal(task)}>Update</button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {/if}
   {/if}
 </PageShell>
 
@@ -255,49 +142,6 @@
   </div>
 </Modal>
 
-<Modal bind:open={taskOpen} title="Assign Psychiatry Task">
-  <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <div class="assignee-autocomplete">
-        {#if assigneeSelected}
-          <span class="token">{assigneeSelected.full_name || assigneeSelected.username}<button class="token-remove" onclick={() => { assigneeSelected = null; assigneeSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={assigneeSearch} placeholder="Search by name or username…" />
-            {#if assigneeSuggestions.length > 0}
-              <div class="suggestions">
-                {#each assigneeSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { assigneeSelected = u; assigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    </div>
-    <Field label="Title" bind:value={tTitle} required />
-    <Field label="Description" type="textarea" bind:value={tDesc} />
-    <Field label="Due Date" type="datetime-local" bind:value={tDue} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { taskOpen = false; assigneeSelected = null; assigneeSearch = ''; }}>Cancel</button>
-      <button class="btn-primary" onclick={assignTask}>Assign</button>
-    </div>
-  </div>
-</Modal>
-
-<Modal bind:open={taskStatusOpen} title="Update Task Status">
-  <div class="form">
-    <p class="info-text">Task: <strong>{selectedTask?.title}</strong></p>
-    <Field label="Status" type="select" bind:value={taskStatus} options={taskStatusOpts} />
-    <Field label="Progress Notes" type="textarea" bind:value={taskProgressNotes} />
-    <div class="form-actions">
-      <button class="btn-secondary" onclick={() => taskStatusOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={updateTaskStatus}>Update</button>
-    </div>
-  </div>
-</Modal>
-
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -310,29 +154,4 @@
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
-  .btn-small { background: none; border: 1px solid #1e2d4a; border-radius: 3px; color: #8fa3cc; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.625rem; }
-  .btn-small:hover { border-color: #3d7fff; color: #3d7fff; }
-  .table-wrap { overflow-x: auto; }
-  .data-table { width: 100%; border-collapse: collapse; font-family: 'Outfit', sans-serif; font-size: 0.85rem; }
-  .data-table th { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em; padding: 0.5rem 0.75rem; text-align: left; text-transform: uppercase; border-bottom: 1px solid #1e2d4a; }
-  .data-table td { border-bottom: 1px solid #0d1a2e; color: #c8d8f0; padding: 0.6rem 0.75rem; }
-  .data-table tr:hover td { background: rgba(61,127,255,0.04); }
-  .empty { color: #4a5d82; padding: 1rem 0.75rem; text-align: center; }
-  .badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
-  .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
-  .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
-  .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
-  .badge-cancelled { background: rgba(255,68,102,0.12); color: #ff4466; }
-  .field { display: flex; flex-direction: column; gap: 0.375rem; }
-  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
-  .assignee-autocomplete { position: relative; }
-  .autocomplete-wrap { position: relative; }
-  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
-  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
-  .suggestion-item:last-child { border-bottom: none; }
-  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
-  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
-  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
-  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
-  .token-remove:hover { color: #ff4466; }
 </style>
