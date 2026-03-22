@@ -55,6 +55,7 @@ pub fn run() {
             commands::data_commands::review_data_request,
             commands::data_commands::start_processing,
             commands::data_commands::analyst_submit_response,
+            commands::data_commands::analyst_reject_request,
             commands::data_commands::deliver_data_response,
             // security
             commands::security_commands::create_incident_report,

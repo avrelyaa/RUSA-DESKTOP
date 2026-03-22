@@ -42,6 +42,11 @@
   let responseData = $state('');
   let analystNotes = $state('');
 
+  // Analyst rejection
+  let rejectOpen = $state(false);
+  let rejectReq: any = $state(null);
+  let rejectionReason = $state('');
+
   const role = $derived($session?.role_name ?? '');
 
   function initTab() {
@@ -127,6 +132,22 @@
       await dataApi.analystSubmit(s.token, submitReq.id, responseData, analystNotes || undefined);
       showToast('Submitted to Statistician', 'success');
       submitOpen = false;
+      await reload();
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openReject(req: any) {
+    rejectReq = req; rejectionReason = '';
+    rejectOpen = true;
+  }
+
+  async function doAnalystReject() {
+    const s = $session; if (!s || !rejectReq) return;
+    if (!rejectionReason.trim()) { showToast('Rejection reason required', 'error'); return; }
+    try {
+      await dataApi.analystReject(s.token, rejectReq.id, rejectionReason);
+      showToast('Request rejected', 'success');
+      rejectOpen = false;
       await reload();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -259,11 +280,12 @@
 
   // ---- Derived request lists ----
   const pending = $derived(requests.filter(r => r.status === 'pending'));
-  const inProgress = $derived(requests.filter(r => r.status === 'approved' || r.status === 'processing'));
+  const inProgress = $derived(requests.filter(r => r.status === 'approved' || r.status === 'processing' || r.status === 'analyst_rejected'));
   const awaitingFinalReview = $derived(requests.filter(r => r.status === 'analyst_submitted'));
   const delivered = $derived(requests.filter(r => r.status === 'delivered'));
   const approvedForAnalyst = $derived(requests.filter(r => r.status === 'approved' || r.status === 'processing'));
   const submittedByAnalyst = $derived(requests.filter(r => r.status === 'analyst_submitted'));
+  const rejectedByAnalyst = $derived(requests.filter(r => r.status === 'analyst_rejected'));
   const myRequests = $derived(requests);
 
   const analystUsers = $derived(allUsers.filter(u => u.role_name === 'data_analyst'));
@@ -271,7 +293,8 @@
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
       pending: 'badge-pending', approved: 'badge-approved', rejected: 'badge-rejected',
-      processing: 'badge-processing', analyst_submitted: 'badge-submitted', delivered: 'badge-delivered'
+      processing: 'badge-processing', analyst_submitted: 'badge-submitted',
+      analyst_rejected: 'badge-analyst-rejected', delivered: 'badge-delivered'
     };
     return map[s] || '';
   };
@@ -314,6 +337,9 @@
           <div class="req-info">
             <span class="req-title">{req.title}</span>
             <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
+            {#if req.status === 'analyst_rejected'}
+              <span class="req-meta">Rejection reason: {req.analyst_rejection_reason || '—'}</span>
+            {/if}
           </div>
         </div>
       {/each}
@@ -372,6 +398,7 @@
             {/if}
             <button class="btn-analyze" onclick={() => { activeRequest = req; activeTab = 'analyze'; }}>Analyze</button>
             <button class="btn-primary" onclick={() => openSubmit(req)}>Submit Results</button>
+            <button class="btn-danger" onclick={() => openReject(req)}>Reject</button>
           </div>
         </div>
       {/each}
@@ -436,7 +463,7 @@
       {/if}
 
     {:else if activeTab === 'submit'}
-      <div class="section-bar"><h2 class="section-title">Submit Results</h2></div>
+      <div class="section-bar"><h2 class="section-title">Submitted Results</h2></div>
       {#if submittedByAnalyst.length === 0}<p class="empty">No submissions yet</p>{/if}
       {#each submittedByAnalyst as req}
         <div class="req-card">
@@ -447,6 +474,18 @@
           </div>
         </div>
       {/each}
+      {#if rejectedByAnalyst.length > 0}
+        <div class="section-bar" style="margin-top:1.5rem"><h2 class="section-title">Rejected by You</h2></div>
+        {#each rejectedByAnalyst as req}
+          <div class="req-card">
+            <div class="req-info">
+              <span class="req-title">{req.title}</span>
+              <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
+              <span class="req-meta">Rejection reason: {req.analyst_rejection_reason || '—'}</span>
+            </div>
+          </div>
+        {/each}
+      {/if}
     {/if}
 
   {:else}
@@ -529,6 +568,19 @@
   </div>
 </Modal>
 
+<!-- Analyst Reject Modal -->
+<Modal bind:open={rejectOpen} title="Reject Request: {rejectReq?.title}">
+  <div class="form">
+    <p class="req-meta">Status: <strong>{rejectReq?.status}</strong></p>
+    <p class="req-desc">{rejectReq?.description || ''}</p>
+    <Field label="Rejection Reason" type="textarea" bind:value={rejectionReason} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => rejectOpen = false}>Cancel</button>
+      <button class="btn-danger" onclick={doAnalystReject}>Reject Request</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs-bar { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; padding: 0.6rem 1rem; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 0.4rem; }
@@ -552,6 +604,7 @@
   .badge-rejected { background: rgba(255,68,102,0.1); color: #ff4466; }
   .badge-processing { background: rgba(61,127,255,0.1); color: #3d7fff; }
   .badge-submitted { background: rgba(180,130,255,0.1); color: #b482ff; }
+  .badge-analyst-rejected { background: rgba(255,140,0,0.12); color: #ff8c00; }
   .badge-delivered { background: rgba(0,200,100,0.1); color: #00c864; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }

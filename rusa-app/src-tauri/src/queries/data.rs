@@ -14,6 +14,7 @@ pub struct DataRequestRow {
     pub response_data: Option<String>,
     pub responded_by: Option<Uuid>,
     pub analyst_notes: Option<String>,
+    pub analyst_rejection_reason: Option<String>,
     pub assigned_to: Option<Uuid>,
     pub delivered_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -39,7 +40,7 @@ pub async fn insert_data_request(
 
 pub async fn get_all_data_requests() -> Result<Vec<DataRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, DataRequestRow>(
-        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, assigned_to, delivered_at, created_at FROM data_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, analyst_rejection_reason, assigned_to, delivered_at, created_at FROM data_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -47,7 +48,7 @@ pub async fn get_all_data_requests() -> Result<Vec<DataRequestRow>, sqlx::Error>
 
 pub async fn get_analyst_data_requests() -> Result<Vec<DataRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, DataRequestRow>(
-        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, assigned_to, delivered_at, created_at FROM data_requests WHERE status IN ('approved', 'processing', 'analyst_submitted') AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, analyst_rejection_reason, assigned_to, delivered_at, created_at FROM data_requests WHERE status IN ('approved', 'processing', 'analyst_submitted', 'analyst_rejected') AND (data_type IS NULL OR LOWER(data_type) != 'medical') AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -55,11 +56,21 @@ pub async fn get_analyst_data_requests() -> Result<Vec<DataRequestRow>, sqlx::Er
 
 pub async fn get_user_data_requests(user_id: Uuid) -> Result<Vec<DataRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, DataRequestRow>(
-        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, assigned_to, delivered_at, created_at FROM data_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, data_type, status, requested_by, reviewed_by, review_notes, response_data, responded_by, analyst_notes, analyst_rejection_reason, assigned_to, delivered_at, created_at FROM data_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(get_db())
     .await
+}
+
+pub async fn get_data_request_data_type(request_id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT data_type FROM data_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_optional(get_db())
+    .await?;
+    Ok(row.and_then(|(dt,)| dt))
 }
 
 pub async fn update_data_request_review(
@@ -118,6 +129,22 @@ pub async fn update_data_request_delivered(request_id: Uuid) -> Result<(), sqlx:
     sqlx::query(
         "UPDATE data_requests SET status = 'delivered', delivered_at = NOW() WHERE id = $1 AND status = 'analyst_submitted' AND deleted_at IS NULL",
     )
+    .bind(request_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn update_data_request_analyst_rejection(
+    request_id: Uuid,
+    rejection_reason: &str,
+    responded_by: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE data_requests SET status = 'analyst_rejected', analyst_rejection_reason = $1, responded_by = $2 WHERE id = $3 AND status IN ('approved', 'processing') AND (data_type IS NULL OR LOWER(data_type) != 'medical') AND deleted_at IS NULL",
+    )
+    .bind(rejection_reason)
+    .bind(responded_by)
     .bind(request_id)
     .execute(get_db())
     .await?;

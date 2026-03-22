@@ -61,6 +61,8 @@ export const dataApi = {
     invoke<void>('start_processing', { token, requestId }),
   analystSubmit: (token: string, requestId: string, responseData: string, analystNotes?: string) =>
     invoke<void>('analyst_submit_response', { token, requestId, responseData, analystNotes }),
+  analystReject: (token: string, requestId: string, rejectionReason: string) =>
+    invoke<void>('analyst_reject_request', { token, requestId, rejectionReason }),
   deliver: (token: string, requestId: string) =>
     invoke<void>('deliver_data_response', { token, requestId }),
 };
