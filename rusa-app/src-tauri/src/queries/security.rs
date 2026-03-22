@@ -321,3 +321,12 @@ pub async fn get_all_external_reports() -> Result<Vec<ExternalReportRow>, sqlx::
     .fetch_all(get_db())
     .await
 }
+
+pub async fn get_external_reports_by_submitter(submitted_by: Uuid) -> Result<Vec<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(
+        "SELECT id, title, description, submitted_by, security_type, status, incident_report_id, created_at FROM external_reports WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(submitted_by)
+    .fetch_all(get_db())
+    .await
+}

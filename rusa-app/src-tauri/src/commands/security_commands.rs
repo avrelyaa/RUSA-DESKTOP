@@ -329,11 +329,15 @@ pub async fn submit_external_report(
 
 #[tauri::command]
 pub async fn get_external_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
-    let _session = validate_session_command(&token).await?;
+    let session = validate_session_command(&token).await?;
 
-    let rows = security_queries::get_all_external_reports()
-        .await
-        .map_err(|e| format!("DB error: {}", e))?;
+    let security_roles = ["the_guardian", "the_overseer", "earth_security_head", "earth_security_staff", "galactic_security_head", "galactic_security_staff"];
+    let rows = if security_roles.contains(&session.role_name.as_str()) {
+        security_queries::get_all_external_reports().await
+    } else {
+        security_queries::get_external_reports_by_submitter(session.user_id).await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }
