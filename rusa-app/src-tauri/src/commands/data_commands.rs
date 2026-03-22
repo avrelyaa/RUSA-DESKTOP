@@ -77,6 +77,14 @@ pub async fn start_processing(token: String, request_id: String) -> Result<(), S
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
+    let data_type = data_queries::get_data_request_data_type(rid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    if data_type.as_deref().map(|dt| dt.to_lowercase() == "medical").unwrap_or(false) {
+        let _ = write_audit_log(Some(session.user_id), "MEDICAL_DATA_ACCESS_DENIED", Some("data_requests"), Some(rid), None, None).await;
+        return Err("Access denied: medical data requests cannot be processed by data analysts".to_string());
+    }
+
     data_queries::update_data_request_processing(rid, session.user_id)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
@@ -98,6 +106,14 @@ pub async fn analyst_submit_response(
 
     let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
 
+    let data_type = data_queries::get_data_request_data_type(rid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    if data_type.as_deref().map(|dt| dt.to_lowercase() == "medical").unwrap_or(false) {
+        let _ = write_audit_log(Some(session.user_id), "MEDICAL_DATA_ACCESS_DENIED", Some("data_requests"), Some(rid), None, None).await;
+        return Err("Access denied: medical data requests cannot be processed by data analysts".to_string());
+    }
+
     data_queries::update_data_request_analyst_response(
         rid,
         &response_data,
@@ -108,6 +124,38 @@ pub async fn analyst_submit_response(
     .map_err(|e| format!("DB error: {}", e))?;
 
     let _ = write_audit_log(Some(session.user_id), "ANALYST_SUBMIT_RESPONSE", Some("data_requests"), Some(rid), None, None).await;
+    Ok(())
+}
+
+// Step 3b: Data Analyst rejects a data request with a reason
+#[tauri::command]
+pub async fn analyst_reject_request(
+    token: String,
+    request_id: String,
+    rejection_reason: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "data_analyst")?;
+
+    if rejection_reason.trim().is_empty() {
+        return Err("Rejection reason is required".to_string());
+    }
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    let data_type = data_queries::get_data_request_data_type(rid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+    if data_type.as_deref().map(|dt| dt.to_lowercase() == "medical").unwrap_or(false) {
+        let _ = write_audit_log(Some(session.user_id), "MEDICAL_DATA_ACCESS_DENIED", Some("data_requests"), Some(rid), None, None).await;
+        return Err("Access denied: medical data requests cannot be processed by data analysts".to_string());
+    }
+
+    data_queries::update_data_request_analyst_rejection(rid, &rejection_reason, session.user_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "ANALYST_REJECT_REQUEST", Some("data_requests"), Some(rid), None, Some(serde_json::json!({ "reason": rejection_reason }))).await;
     Ok(())
 }
 
