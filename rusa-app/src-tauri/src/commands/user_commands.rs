@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[tauri::command]
 pub async fn get_all_users(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
-    require_role(&session, 2)?;
+    require_role(&session, 1)?;
 
     let users = query_list_users()
         .await
