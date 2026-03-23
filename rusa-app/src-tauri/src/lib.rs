@@ -52,6 +52,11 @@ pub fn run() {
             commands::research_commands::get_test_archive,
             commands::research_commands::propose_test,
             commands::research_commands::review_test_proposal,
+            commands::research_commands::link_tests_to_log,
+            commands::research_commands::propose_species_from_discovery,
+            commands::research_commands::get_observer_dashboard,
+            commands::research_commands::assign_experiment_task,
+            commands::research_commands::get_experiment_tasks,
             // data
             commands::data_commands::submit_data_request,
             commands::data_commands::get_data_requests,
