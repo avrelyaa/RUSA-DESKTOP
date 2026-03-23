@@ -4,14 +4,15 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { governanceApi, userApi } from '$lib/api';
+  import { governanceApi, userApi, generalApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
 
-  type Tab = 'votes' | 'meetings' | 'relocations' | 'events' | 'nomad_tasks' | 'librarian' | 'accounts';
+  type Tab = 'votes' | 'general_requests' | 'meetings' | 'relocations' | 'events' | 'nomad_tasks' | 'librarian' | 'accounts';
   let activeTab = $state<Tab>('votes');
 
   let votes: any[] = $state([]);
+  let generalRequests: any[] = $state([]);
   let meetings: any[] = $state([]);
   let relocations: any[] = $state([]);
   let events: any[] = $state([]);
@@ -31,6 +32,17 @@
   let voteOpen = $state(false);
   let vTitle = $state('');
   let vDesc = $state('');
+
+  // General request form
+  let genReqOpen = $state(false);
+  let grTitle = $state('');
+  let grDesc = $state('');
+
+  // Review general request modal
+  let reviewGenOpen = $state(false);
+  let selectedGenReq: any = $state(null);
+  let genReviewStatus = $state('');
+  let genReviewNotes = $state('');
 
   // Cast vote modal
   let castOpen = $state(false);
@@ -109,8 +121,9 @@
         governanceApi.getMeetings(s.token),
         governanceApi.getRelocations(s.token),
         governanceApi.getEvents(s.token),
+        generalApi.getGeneralRequests(s.token),
       ]);
-      [votes, meetings, relocations, events] = base;
+      [votes, meetings, relocations, events, generalRequests] = base;
       if (s.role_name === 'the_nomad') {
         nomadTasks = await governanceApi.getNomadTasks(s.token);
         allUsers = await userApi.getAll(s.token);
@@ -144,6 +157,28 @@
       await governanceApi.castVote(s.token, selectedVote.id, castDecision);
       showToast('Vote cast', 'success'); castOpen = false;
       votes = await governanceApi.getVotes(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitGeneralRequest() {
+    const s = $session; if (!s) return;
+    if (!grTitle || !grDesc) { showToast('Title and description required', 'error'); return; }
+    try {
+      await generalApi.submitGeneralRequest(s.token, grTitle, grDesc);
+      showToast('General request submitted — directors\' vote auto-initiated', 'success');
+      genReqOpen = false; grTitle = ''; grDesc = '';
+      generalRequests = await generalApi.getGeneralRequests(s.token);
+      votes = await governanceApi.getVotes(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitGenReview() {
+    const s = $session; if (!s || !selectedGenReq) return;
+    if (!genReviewStatus) { showToast('Decision required', 'error'); return; }
+    try {
+      await generalApi.reviewGeneralRequest(s.token, selectedGenReq.id, genReviewStatus, genReviewNotes || undefined);
+      showToast('Review submitted', 'success'); reviewGenOpen = false;
+      generalRequests = await generalApi.getGeneralRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -223,7 +258,17 @@
   const voteCols = [
     { key: 'title', label: 'Motion' },
     { key: 'status', label: 'Status' },
+    { key: 'vote_type', label: 'Type' },
     { key: 'created_at', label: 'Initiated' },
+  ];
+  const genReqCols = [
+    { key: 'title', label: 'Title' },
+    { key: 'status', label: 'Status' },
+    { key: 'created_at', label: 'Submitted' },
+  ];
+  const reviewDecisionOpts = [
+    { value: 'approved', label: 'Approve' },
+    { value: 'rejected', label: 'Reject' },
   ];
   const meetingCols = [
     { key: 'title', label: 'Meeting' },
@@ -316,6 +361,7 @@
 <PageShell title="Governance" subtitle="Votes, meetings, relocations, and event documentation">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='votes'} onclick={() => activeTab='votes'}>Votes</button>
+    <button class="tab" class:active={activeTab==='general_requests'} onclick={() => activeTab='general_requests'}>General Requests</button>
     <button class="tab" class:active={activeTab==='meetings'} onclick={() => activeTab='meetings'}>Meetings</button>
     <button class="tab" class:active={activeTab==='relocations'} onclick={() => activeTab='relocations'}>Relocations</button>
     <button class="tab" class:active={activeTab==='events'} onclick={() => activeTab='events'}>Events</button>
@@ -352,11 +398,55 @@
             </div>
             <div class="vote-right">
               <span class="status-badge status-{vote.status}">{vote.status}</span>
+              {#if vote.vote_type}
+                <span class="vote-type-badge vote-type-{vote.vote_type}">{vote.vote_type === 'general' ? '🗳 General' : vote.vote_type === 'budget' ? '💰 Budget' : '⚡ Pressing'}</span>
+              {/if}
               {#if vote.status === 'open' && vote.deadline && !isExpired(vote.deadline)}
                 <span class="countdown">⏱ {getTimeRemaining(vote.deadline)}</span>
                 <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castOpen = true; }}>Cast Vote</button>
               {:else if vote.status === 'open' && isExpired(vote.deadline)}
                 <span class="countdown expired-label">Resolving...</span>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  {:else if activeTab === 'general_requests'}
+    <div class="section-bar">
+      <h2 class="section-title">General Requests</h2>
+      <div class="bypass-info-row">
+        <span class="vote-type-badge vote-type-general">🗳 Auto-voted by Directors</span>
+      </div>
+      <button class="btn-primary" onclick={() => genReqOpen = true}>+ Submit Request</button>
+    </div>
+    <p class="vote-system-note">
+      General requests automatically trigger a directors' vote upon submission. Approval is only possible after the linked vote passes.
+      <strong>Data requests, conclusion requests, and security broadcasts bypass this voting system</strong> and are handled by their respective specialists.
+    </p>
+    {#if generalRequests.length === 0}
+      <p class="empty">No general requests found</p>
+    {:else}
+      <div class="vote-list">
+        {#each generalRequests as req}
+          <div class="vote-card" class:expired={req.status !== 'under_vote' && req.status !== 'pending'}>
+            <div class="vote-info">
+              <span class="vote-title">{req.title}</span>
+              {#if req.description}
+                <span class="vote-desc">{req.description}</span>
+              {/if}
+              <span class="vote-meta">Submitted: {req.created_at ? new Date(req.created_at).toLocaleString() : ''}</span>
+              {#if req.vote_id}
+                <span class="vote-meta">Linked vote: <code class="vote-id-code">{req.vote_id}</code></span>
+              {/if}
+            </div>
+            <div class="vote-right">
+              <span class="status-badge status-{req.status}">{req.status}</span>
+              {#if req.vote_id}
+                <span class="vote-type-badge vote-type-general">🗳 Under Director Vote</span>
+              {/if}
+              {#if isDirectorOrAbove && (req.status === 'under_vote' || req.status === 'pending')}
+                <button class="btn-primary" onclick={() => { selectedGenReq = req; genReviewStatus = ''; genReviewNotes = ''; reviewGenOpen = true; }}>Review</button>
               {/if}
             </div>
           </div>
@@ -524,6 +614,39 @@
   </div>
 </Modal>
 
+<Modal bind:open={genReqOpen} title="Submit General Request">
+  <div class="form">
+    <p class="vote-system-note">This request will automatically initiate a directors' vote upon submission. Approval requires the vote to pass.</p>
+    <Field label="Title" bind:value={grTitle} required />
+    <Field label="Description" type="textarea" bind:value={grDesc} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => genReqOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitGeneralRequest}>Submit & Initiate Vote</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={reviewGenOpen} title="Review General Request: {selectedGenReq?.title}">
+  <div class="form">
+    {#if selectedGenReq}
+      <p class="vote-system-note">
+        {#if selectedGenReq.vote_id}
+          This request has a linked directors' vote. You can only approve it once the vote has <strong>passed</strong>.
+        {:else}
+          No vote is linked to this request yet.
+        {/if}
+      </p>
+      <p class="info-text">Request: <strong>{selectedGenReq.description}</strong></p>
+    {/if}
+    <Field label="Decision" type="select" bind:value={genReviewStatus} options={reviewDecisionOpts} required />
+    <Field label="Review Notes" type="textarea" bind:value={genReviewNotes} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => reviewGenOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitGenReview}>Submit Review</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -550,6 +673,10 @@
   .status-passed { background: rgba(0,255,128,0.12); color: #00ff80; }
   .status-failed { background: rgba(255,68,102,0.12); color: #ff4466; }
   .status-interrupted { background: rgba(255,170,0,0.12); color: #ffaa00; }
+  .status-under_vote { background: rgba(255,170,0,0.12); color: #ffaa00; }
+  .status-pending { background: rgba(0,212,255,0.1); color: #8fa3cc; }
+  .status-approved { background: rgba(0,255,128,0.12); color: #00ff80; }
+  .status-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
   .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
   .vote-timer { font-size: 0.82rem; color: #8fa3cc; margin: 0; }
   .director-card { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.5rem; max-width: 500px; }
@@ -565,4 +692,12 @@
   .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
   .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
   .token-remove:hover { color: #ff4466; }
+  .vote-type-badge { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .vote-type-general { background: rgba(0,212,255,0.1); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2); }
+  .vote-type-budget { background: rgba(255,200,0,0.1); color: #ffc800; border: 1px solid rgba(255,200,0,0.25); }
+  .vote-type-pressing_issue { background: rgba(255,100,68,0.1); color: #ff6444; border: 1px solid rgba(255,100,68,0.25); }
+  .bypass-info-row { display: flex; align-items: center; gap: 0.5rem; flex: 1; padding-left: 1rem; }
+  .vote-system-note { background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.15); border-radius: 4px; color: #8fa3cc; font-size: 0.82rem; margin-bottom: 0.75rem; padding: 0.6rem 0.85rem; }
+  .vote-id-code { background: rgba(255,255,255,0.05); border-radius: 3px; color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.72rem; padding: 1px 4px; }
+  .info-text { color: #8fa3cc; font-size: 0.88rem; margin: 0; }
 </style>

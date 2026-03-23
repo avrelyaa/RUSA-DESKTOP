@@ -15,6 +15,11 @@
   let expenditures: any[] = $state([]);
   let loading = $state(false);
 
+  const role = $derived($session?.role_name ?? '');
+  const tier = $derived($session?.tier ?? 0);
+  const isAccountant = $derived(role === 'the_accountant');
+  const canInitiateVote = $derived(isAccountant || tier >= 3);
+
   // Review modals
   let reviewOpen = $state(false);
   let selectedItem: any = $state(null);
@@ -48,6 +53,15 @@
 
   function openFlag(item: any, type: 'budget' | 'expenditure') {
     selectedItem = item; reviewType = type; flagReason = ''; flagOpen = true;
+  }
+
+  async function initiateVoteForRequest(item: any) {
+    const s = $session; if (!s) return;
+    try {
+      const voteId = await budgetApi.initiateBudgetVote(s.token, item.id);
+      showToast(`Directors' vote initiated (ID: ${voteId})`, 'success');
+      requests = await budgetApi.getBudgetRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
   async function submitReview() {
@@ -85,12 +99,6 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
-  const reqCols = [
-    { key: 'title', label: 'Title' },
-    { key: 'department', label: 'Department' },
-    { key: 'amount', label: 'Amount' },
-    { key: 'status', label: 'Status' },
-  ];
   const expCols = [
     { key: 'title', label: 'Title' },
     { key: 'department', label: 'Department' },
@@ -118,7 +126,47 @@
   {#if loading}
     <p class="loading">Loading...</p>
   {:else if activeTab === 'requests'}
-    <Table columns={reqCols} rows={requests} onRowClick={(r) => openReview(r, 'budget')} />
+    <p class="vote-system-note">
+      💰 <strong>Budget requests require a collective directors' vote</strong> before they can be approved.
+      Use "Initiate Director Vote" on any pending request to start the vote. Approval is blocked until the vote passes.
+    </p>
+    {#if requests.length === 0}
+      <p class="empty">No budget requests found</p>
+    {:else}
+      <div class="request-list">
+        {#each requests as req}
+          <div class="request-card">
+            <div class="request-info">
+              <span class="request-title">{req.title}</span>
+              {#if req.description}
+                <span class="request-desc">{req.description}</span>
+              {/if}
+              <span class="request-meta">Amount: <strong>${req.amount ?? '—'}</strong></span>
+              {#if req.accountant_notes}
+                <span class="request-meta">Notes: {req.accountant_notes}</span>
+              {/if}
+            </div>
+            <div class="request-right">
+              <span class="status-badge status-{req.status}">{req.status}</span>
+              {#if req.vote_id}
+                <span class="vote-badge vote-badge-linked">🗳 Directors' Vote Required</span>
+              {:else if req.status === 'pending'}
+                <span class="vote-badge vote-badge-missing">⚠ No Vote Yet</span>
+              {/if}
+              <div class="request-actions">
+                {#if canInitiateVote && req.status === 'pending' && !req.vote_id}
+                  <button class="btn-vote" onclick={() => initiateVoteForRequest(req)}>Initiate Director Vote</button>
+                {/if}
+                {#if isAccountant && (req.status === 'pending' || req.status === 'under_review')}
+                  <button class="btn-primary" onclick={() => openReview(req, 'budget')}>Review</button>
+                  <button class="btn-warning-sm" onclick={() => openFlag(req, 'budget')}>Flag</button>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {:else if activeTab === 'expenditures'}
     <Table columns={expCols} rows={expenditures} onRowClick={(r) => openReview(r, 'expenditure')} />
   {/if}
@@ -127,6 +175,18 @@
 <Modal bind:open={reviewOpen} title="Review: {selectedItem?.title}">
   <div class="form">
     <p class="info-text">Amount: <strong>{selectedItem?.amount || selectedItem?.total_amount}</strong></p>
+    {#if selectedItem?.vote_id}
+      <p class="vote-requirement-note">
+        🗳 This budget request has a linked directors' vote. <strong>Approval requires the vote to have passed.</strong>
+        If the vote has not passed, the approval will be blocked.
+      </p>
+    {:else}
+      <p class="vote-warning-note">
+        ⚠ <strong>No directors' vote is linked to this request.</strong>
+        Per RUSA policy, budget requests require a collective directors' vote before approval.
+        Close this review and use "Initiate Director Vote" first.
+      </p>
+    {/if}
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
     <div class="form-actions">
@@ -165,10 +225,34 @@
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
   .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
   .loading { color: #4a5d82; padding: 2rem 0; }
+  .empty { color: #4a5d82; padding: 1.5rem 0; font-size: 0.9rem; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; }
-  .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .vote-system-note { background: rgba(255,200,0,0.06); border: 1px solid rgba(255,200,0,0.2); border-radius: 4px; color: #8fa3cc; font-size: 0.82rem; margin-bottom: 1rem; padding: 0.6rem 0.85rem; }
+  .vote-requirement-note { background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.2); border-radius: 4px; color: #8fa3cc; font-size: 0.82rem; padding: 0.6rem 0.85rem; }
+  .vote-warning-note { background: rgba(255,170,0,0.07); border: 1px solid rgba(255,170,0,0.25); border-radius: 4px; color: #ffaa00; font-size: 0.82rem; padding: 0.6rem 0.85rem; }
+  .request-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .request-card { display: flex; align-items: flex-start; justify-content: space-between; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 6px; padding: 1rem 1.25rem; gap: 1rem; }
+  .request-info { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; }
+  .request-title { color: #e8eeff; font-size: 0.95rem; font-weight: 500; }
+  .request-desc { color: #6a7f9a; font-size: 0.82rem; }
+  .request-meta { color: #4a5d82; font-size: 0.75rem; }
+  .request-right { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; flex-shrink: 0; }
+  .request-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: flex-end; }
+  .status-badge { display: inline-block; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .status-pending { background: rgba(0,212,255,0.1); color: #8fa3cc; }
+  .status-approved { background: rgba(0,255,128,0.12); color: #00ff80; }
+  .status-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
+  .status-flagged { background: rgba(255,170,0,0.12); color: #ffaa00; }
+  .status-under_review { background: rgba(255,200,0,0.1); color: #ffc800; }
+  .vote-badge { display: inline-block; font-size: 0.7rem; font-family: 'Space Mono', monospace; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .vote-badge-linked { background: rgba(255,200,0,0.1); color: #ffc800; border: 1px solid rgba(255,200,0,0.25); }
+  .vote-badge-missing { background: rgba(255,100,68,0.1); color: #ff6444; border: 1px solid rgba(255,100,68,0.2); }
+  .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.5rem 1rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-warning { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .btn-warning-sm { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.75rem; padding: 0.4rem 0.75rem; }
+  .btn-vote { background: rgba(255,200,0,0.1); border: 1px solid rgba(255,200,0,0.4); border-radius: 4px; color: #ffc800; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.05em; padding: 0.4rem 0.75rem; text-transform: uppercase; }
+  .btn-vote:hover { background: rgba(255,200,0,0.15); }
 </style>

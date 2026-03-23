@@ -11,6 +11,7 @@ pub struct BudgetRequestRow {
     pub status: Option<String>,
     pub requested_by: Option<Uuid>,
     pub accountant_notes: Option<String>,
+    pub vote_id: Option<Uuid>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -83,7 +84,7 @@ pub async fn insert_expenditure_report(
 
 pub async fn get_all_budget_requests() -> Result<Vec<BudgetRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, BudgetRequestRow>(
-        "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, created_at FROM budget_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, vote_id, created_at FROM budget_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -91,7 +92,7 @@ pub async fn get_all_budget_requests() -> Result<Vec<BudgetRequestRow>, sqlx::Er
 
 pub async fn get_user_budget_requests(user_id: Uuid) -> Result<Vec<BudgetRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, BudgetRequestRow>(
-        "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, created_at FROM budget_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, amount, items, status, requested_by, accountant_notes, vote_id, created_at FROM budget_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(get_db())
@@ -161,7 +162,33 @@ pub async fn flag_expenditure_report(
     Ok(())
 }
 
-pub async fn insert_investigation(
+pub async fn get_budget_request_vote_status(
+    request_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT v.status FROM budget_requests br \
+         LEFT JOIN votes v ON br.vote_id = v.id \
+         WHERE br.id = $1 AND br.deleted_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_optional(get_db())
+    .await?;
+    Ok(row.and_then(|(s,)| s))
+}
+
+pub async fn link_budget_request_to_vote(
+    request_id: Uuid,
+    vote_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE budget_requests SET vote_id = $1, requires_vote = TRUE WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(vote_id)
+    .bind(request_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
     title: &str,
     description: &str,
     related_report_id: Option<Uuid>,

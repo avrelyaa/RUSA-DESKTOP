@@ -15,3 +15,4 @@ pub mod governance_commands;
 pub mod budget_commands;
 pub mod admin_commands;
 pub mod research_task_commands;
+pub mod general_commands;

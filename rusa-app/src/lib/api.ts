@@ -309,6 +309,17 @@ export const budgetApi = {
     invoke<void>('flag_expenditure_report', { token, reportId, reason }),
   submitInvestigation: (token: string, title: string, description: string, relatedReportId?: string) =>
     invoke<string>('submit_investigation', { token, title, description, relatedReportId }),
+  initiateBudgetVote: (token: string, requestId: string) =>
+    invoke<string>('initiate_budget_vote', { token, requestId }),
+};
+
+// General Requests (auto-trigger director votes)
+export const generalApi = {
+  submitGeneralRequest: (token: string, title: string, description: string) =>
+    invoke<string>('submit_general_request', { token, title, description }),
+  getGeneralRequests: (token: string) => invoke<any[]>('get_general_requests', { token }),
+  reviewGeneralRequest: (token: string, requestId: string, status: string, notes?: string) =>
+    invoke<void>('review_general_request', { token, requestId, status, notes }),
 };
 
 // Aerospace Engineering

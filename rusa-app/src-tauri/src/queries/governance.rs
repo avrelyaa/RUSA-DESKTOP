@@ -7,6 +7,7 @@ pub struct VoteRow {
     pub title: String,
     pub description: Option<String>,
     pub status: Option<String>,
+    pub vote_type: Option<String>,
     pub initiated_by: Option<Uuid>,
     pub interrupted_by: Option<Uuid>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -68,12 +69,25 @@ pub async fn insert_vote(
     description: Option<&str>,
     initiated_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
+    insert_vote_typed(title, description, initiated_by, "pressing_issue").await
+}
+
+/// Insert a vote with an explicit vote_type.
+/// vote_type must be one of: 'general', 'budget', 'pressing_issue'
+pub async fn insert_vote_typed(
+    title: &str,
+    description: Option<&str>,
+    initiated_by: Uuid,
+    vote_type: &str,
+) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO votes (title, description, status, initiated_by, deadline) VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes') RETURNING id",
+        "INSERT INTO votes (title, description, status, initiated_by, deadline, vote_type) \
+         VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes',$4) RETURNING id",
     )
     .bind(title)
     .bind(description)
     .bind(initiated_by)
+    .bind(vote_type)
     .fetch_one(get_db())
     .await?;
     Ok(row.0)
@@ -126,7 +140,10 @@ pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
 
 pub async fn get_all_votes() -> Result<Vec<VoteRow>, sqlx::Error> {
     sqlx::query_as::<_, VoteRow>(
-        "SELECT id, title, description, status, initiated_by, interrupted_by, created_at, deadline FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, status, \
+         COALESCE(vote_type, 'pressing_issue') as vote_type, \
+         initiated_by, interrupted_by, created_at, deadline \
+         FROM votes WHERE deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await

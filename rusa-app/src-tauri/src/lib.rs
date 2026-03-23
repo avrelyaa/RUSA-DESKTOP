@@ -206,6 +206,11 @@ pub fn run() {
             commands::budget_commands::get_expenditure_reports,
             commands::budget_commands::flag_expenditure_report,
             commands::budget_commands::submit_investigation,
+            commands::budget_commands::initiate_budget_vote,
+            // general requests
+            commands::general_commands::submit_general_request,
+            commands::general_commands::get_general_requests,
+            commands::general_commands::review_general_request,
             // admin
             commands::admin_commands::admin_create_director,
             commands::admin_commands::admin_terminate_director,
