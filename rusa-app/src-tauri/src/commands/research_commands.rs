@@ -16,6 +16,12 @@ struct ExperimentRow {
     start_date: Option<chrono::DateTime<chrono::Utc>>,
     end_date: Option<chrono::DateTime<chrono::Utc>>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_by: Option<Uuid>,
+    conclusion_approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_approved_by: Option<Uuid>,
+    final_notes: Option<String>,
+    conclusion_approved: Option<bool>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -46,7 +52,7 @@ struct TestProposalRow {
 struct ExperimentLogRow {
     id: Uuid,
     experiment_id: Uuid,
-    log_date: Option<chrono::DateTime<chrono::Utc>>,
+    log_date: Option<chrono::NaiveDate>,
     personnel_present: Option<String>,
     species_matter_tested: Option<String>,
     tests_performed: Option<String>,
@@ -60,7 +66,7 @@ pub async fn get_experiments(token: String) -> Result<Vec<serde_json::Value>, St
     let _session = validate_session_command(&token).await?;
 
     let rows = sqlx::query_as::<_, ExperimentRow>(
-        "SELECT id, title, description, experiment_type, status, proposed_by, reviewed_by, review_notes, start_date, end_date, created_at FROM experiments WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        "SELECT id, title, description, experiment_type, status, proposed_by, reviewed_by, review_notes, start_date, end_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, conclusion_approved FROM experiments WHERE deleted_at IS NULL ORDER BY created_at DESC"
     )
     .fetch_all(db::get_db())
     .await
@@ -247,5 +253,136 @@ pub async fn review_test_proposal(
         .map_err(|e| format!("DB error: {}", e))?;
 
     let _ = write_audit_log(Some(session.user_id), "REVIEW_TEST_PROPOSAL", Some("test_proposals"), Some(pid), None, Some(serde_json::json!({ "status": status }))).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_experiment_logs(token: String, experiment_id: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+    let eid = Uuid::parse_str(&experiment_id).map_err(|_| "Invalid experiment ID".to_string())?;
+
+    let rows = sqlx::query_as::<_, ExperimentLogRow>(
+        "SELECT id, experiment_id, log_date, personnel_present, species_matter_tested, tests_performed, notes, logged_by, created_at FROM experiment_logs WHERE experiment_id = $1 AND deleted_at IS NULL ORDER BY log_date DESC"
+    )
+    .bind(eid)
+    .fetch_all(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn request_experiment_conclusion(
+    token: String,
+    experiment_id: String,
+    final_notes: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    let eid = Uuid::parse_str(&experiment_id).map_err(|_| "Invalid experiment ID".to_string())?;
+
+    let row: Option<(Uuid, Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, status, proposed_by FROM experiments WHERE id = $1 AND deleted_at IS NULL"
+    )
+    .bind(eid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (_, status, proposed_by) = row.ok_or_else(|| "Experiment not found".to_string())?;
+
+    if status.as_deref() != Some("in_progress") {
+        return Err("Experiment must be in_progress to request conclusion".to_string());
+    }
+
+    if proposed_by != Some(session.user_id) {
+        return Err("Only the experiment proposer can request conclusion".to_string());
+    }
+
+    if final_notes.trim().is_empty() {
+        return Err("Final notes are required".to_string());
+    }
+
+    let log_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM experiment_logs WHERE experiment_id = $1 AND deleted_at IS NULL"
+    )
+    .bind(eid)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if log_count.0 == 0 {
+        return Err("Experiment must have at least one log entry before requesting conclusion".to_string());
+    }
+
+    sqlx::query(
+        "UPDATE experiments SET status = 'conclusion_requested', conclusion_requested_by = $1, conclusion_requested_at = NOW(), final_notes = $2 WHERE id = $3 AND deleted_at IS NULL"
+    )
+    .bind(session.user_id)
+    .bind(&final_notes)
+    .bind(eid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "REQUEST_EXPERIMENT_CONCLUSION", Some("experiments"), Some(eid), None, Some(serde_json::json!({ "final_notes": final_notes }))).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn approve_experiment_conclusion(
+    token: String,
+    experiment_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+
+    if session.role_name != "the_taskmaster" {
+        return Err("Only the Taskmaster can approve experiment conclusions".to_string());
+    }
+
+    let eid = Uuid::parse_str(&experiment_id).map_err(|_| "Invalid experiment ID".to_string())?;
+
+    let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
+        "SELECT id, status FROM experiments WHERE id = $1 AND deleted_at IS NULL"
+    )
+    .bind(eid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let (_, status) = row.ok_or_else(|| "Experiment not found".to_string())?;
+
+    if status.as_deref() != Some("conclusion_requested") {
+        return Err("Experiment is not awaiting conclusion approval".to_string());
+    }
+
+    match decision.as_str() {
+        "approve" => {
+            sqlx::query(
+                "UPDATE experiments SET status = 'completed', conclusion_approved = true, conclusion_approved_by = $1, conclusion_approved_at = NOW(), review_notes = $2 WHERE id = $3 AND deleted_at IS NULL"
+            )
+            .bind(session.user_id)
+            .bind(&review_notes)
+            .bind(eid)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+        }
+        "reject" => {
+            sqlx::query(
+                "UPDATE experiments SET status = 'in_progress', conclusion_requested_at = NULL, conclusion_requested_by = NULL, review_notes = $1 WHERE id = $2 AND deleted_at IS NULL"
+            )
+            .bind(&review_notes)
+            .bind(eid)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+        }
+        _ => return Err("Decision must be 'approve' or 'reject'".to_string()),
+    }
+
+    let _ = write_audit_log(Some(session.user_id), "APPROVE_EXPERIMENT_CONCLUSION", Some("experiments"), Some(eid), None, Some(serde_json::json!({ "decision": decision }))).await;
     Ok(())
 }

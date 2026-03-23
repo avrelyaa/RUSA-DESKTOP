@@ -8,7 +8,7 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);

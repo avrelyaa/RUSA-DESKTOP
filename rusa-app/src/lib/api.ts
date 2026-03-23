@@ -40,6 +40,12 @@ export const researchApi = {
     invoke<void>('review_experiment', { token, experimentId, status, notes }),
   addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, notes?: string) =>
     invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, notes }),
+  getExperimentLogs: (token: string, experimentId: string) =>
+    invoke<any[]>('get_experiment_logs', { token, experimentId }),
+  requestConclusion: (token: string, experimentId: string, finalNotes: string) =>
+    invoke<void>('request_experiment_conclusion', { token, experimentId, finalNotes }),
+  approveConclusion: (token: string, experimentId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('approve_experiment_conclusion', { token, experimentId, decision, reviewNotes }),
   getSpeciesArchive: (token: string) => invoke<any[]>('get_species_archive', { token }),
   addSpecies: (token: string, name: string, classification?: string, description?: string, habitat?: string) =>
     invoke<string>('add_species', { token, name, classification, description, habitat }),
