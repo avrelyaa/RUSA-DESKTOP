@@ -61,11 +61,34 @@
   let selectedTask: any = $state(null);
   let resultNotes = $state('');
 
+  // Conclusion request modal (for scientists/engineers)
+  let conclusionReqOpen = $state(false);
+  let conclusionReqExp: any = $state(null);
+  let conclusionFinalNotes = $state('');
+
+  // Conclusion review modal (for Taskmaster)
+  let conclusionReviewOpen = $state(false);
+  let conclusionReviewTarget: any = $state(null);
+  let conclusionReviewLogs: any[] = $state([]);
+  let conclusionDecision = $state('');
+  let conclusionReviewNotes = $state('');
+  let conclusionReviewLoading = $state(false);
+
   const canAssignResearchTasks = $derived(
     $session?.role_name === 'the_observer' ||
     $session?.role_name === 'the_artificer' ||
     $session?.role_name === 'the_taskmaster'
   );
+
+  const isTaskmaster = $derived($session?.role_name === 'the_taskmaster');
+
+  const canReviewExperiment = $derived(
+    $session?.role_name === 'the_observer' ||
+    $session?.role_name === 'the_taskmaster' ||
+    ($session?.tier ?? 0) >= 3
+  );
+
+  const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
 
   function filteredAssignees(search: string): any[] {
     const q = search.toLowerCase();
@@ -181,12 +204,68 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  function openConclusionRequest(exp: any) {
+    conclusionReqExp = exp;
+    conclusionFinalNotes = exp.final_notes ?? '';
+    conclusionReqOpen = true;
+  }
+
+  async function submitConclusionRequest() {
+    const s = $session; if (!s || !conclusionReqExp) return;
+    if (!conclusionFinalNotes.trim()) { showToast('Final notes are required', 'error'); return; }
+    try {
+      await researchApi.requestConclusion(s.token, conclusionReqExp.id, conclusionFinalNotes);
+      showToast('Conclusion request submitted', 'success');
+      conclusionReqOpen = false;
+      experiments = await researchApi.getExperiments(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function openConclusionReview(exp: any) {
+    const s = $session; if (!s) return;
+    conclusionReviewTarget = exp;
+    conclusionDecision = '';
+    conclusionReviewNotes = '';
+    conclusionReviewLoading = true;
+    conclusionReviewOpen = true;
+    try {
+      conclusionReviewLogs = await researchApi.getExperimentLogs(s.token, exp.id);
+    } catch (_e: any) {
+      conclusionReviewLogs = [];
+    }
+    conclusionReviewLoading = false;
+  }
+
+  async function submitConclusionReview() {
+    const s = $session; if (!s || !conclusionReviewTarget) return;
+    if (!conclusionDecision) { showToast('Decision required', 'error'); return; }
+    try {
+      await researchApi.approveConclusion(s.token, conclusionReviewTarget.id, conclusionDecision, conclusionReviewNotes || undefined);
+      showToast(conclusionDecision === 'approve' ? 'Conclusion approved' : 'Conclusion rejected', 'success');
+      conclusionReviewOpen = false;
+      experiments = await researchApi.getExperiments(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
       case 'result_submitted': return 'badge badge-progress';
       case 'completed': return 'badge badge-done';
       default: return 'badge';
+    }
+  }
+
+  function expStatusBadgeClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'pending': return 'badge-open';
+      case 'approved': return 'badge-approved';
+      case 'in_progress': return 'badge-progress';
+      case 'conclusion_requested': return 'badge-conclude';
+      case 'completed': return 'badge-done';
+      case 'rejected': return 'badge-rejected';
+      case 'cancelled': return 'badge-rejected';
+      default: return '';
     }
   }
 
@@ -223,6 +302,11 @@
     <button class="tab" class:active={activeTab==='research_tasks'} onclick={() => activeTab='research_tasks'}>
       {canAssignResearchTasks ? 'Research Tasks' : 'My Research Tasks'}
     </button>
+    {#if isTaskmaster}
+      <button class="tab" class:active={activeTab==='pending_conclusions'} onclick={() => activeTab='pending_conclusions'}>
+        Pending Conclusions {#if pendingConclusions.length > 0}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
+      </button>
+    {/if}
   </div>
 
   {#if loading}
@@ -232,7 +316,49 @@
       <h2 class="section-title">Experiments</h2>
       <button class="btn-primary" onclick={() => expOpen = true}>+ Propose Experiment</button>
     </div>
-    <Table columns={expCols} rows={experiments} onRowClick={(r) => openReview(r, 'experiment')} />
+    {#if experiments.length === 0}
+      <p class="empty">No experiments yet.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Start Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each experiments as exp}
+              <tr>
+                <td>{exp.title}</td>
+                <td>{exp.experiment_type ?? '—'}</td>
+                <td>
+                  <span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span>
+                  {#if exp.conclusion_approved}
+                    <span class="badge badge-done" style="margin-left:4px">Concluded</span>
+                  {/if}
+                </td>
+                <td>{exp.start_date ? new Date(exp.start_date).toLocaleDateString() : '—'}</td>
+                <td class="actions-cell">
+                  {#if canReviewExperiment}
+                    <button class="btn-small" onclick={() => openReview(exp, 'experiment')}>Review</button>
+                  {/if}
+                  {#if exp.status === 'in_progress' && exp.proposed_by === $session?.user_id}
+                    <button class="btn-small btn-conclude" onclick={() => openConclusionRequest(exp)}>Request Conclusion</button>
+                  {/if}
+                  {#if isTaskmaster && exp.status === 'conclusion_requested'}
+                    <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review Conclusion</button>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {:else if activeTab === 'species'}
     <div class="section-bar">
       <h2 class="section-title">Species Archive</h2>
@@ -280,6 +406,40 @@
                   {#if canAssignResearchTasks && task.status === 'result_submitted'}
                     <button class="btn-small" onclick={() => completeTask(task)}>Mark Complete</button>
                   {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  {:else if activeTab === 'pending_conclusions'}
+    <div class="section-bar">
+      <h2 class="section-title">Pending Experiment Conclusions</h2>
+    </div>
+    {#if pendingConclusions.length === 0}
+      <p class="empty">No experiment conclusions pending approval.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Experiment Title</th>
+              <th>Type</th>
+              <th>Requested At</th>
+              <th>Final Notes (Preview)</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each pendingConclusions as exp}
+              <tr>
+                <td>{exp.title}</td>
+                <td>{exp.experiment_type ?? '—'}</td>
+                <td>{exp.conclusion_requested_at ? new Date(exp.conclusion_requested_at).toLocaleString() : '—'}</td>
+                <td class="notes-preview">{exp.final_notes ? exp.final_notes.slice(0, 80) + (exp.final_notes.length > 80 ? '…' : '') : '—'}</td>
+                <td>
+                  <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review</button>
                 </td>
               </tr>
             {/each}
@@ -382,6 +542,63 @@
   </div>
 </Modal>
 
+<Modal bind:open={conclusionReqOpen} title="Request Experiment Conclusion">
+  <div class="form">
+    <div class="info-block">
+      <p class="info-text">Experiment: <strong>{conclusionReqExp?.title}</strong></p>
+      <p class="info-text">Started: <strong>{conclusionReqExp?.start_date ? new Date(conclusionReqExp.start_date).toLocaleDateString() : '—'}</strong></p>
+    </div>
+    <Field label="Final Findings / Summary" type="textarea" bind:value={conclusionFinalNotes} rows={6} required hint="Provide a complete summary of the experiment findings before requesting conclusion." />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => conclusionReqOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitConclusionRequest}>Request Conclusion</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={conclusionReviewOpen} title="Review Experiment Conclusion">
+  <div class="form">
+    {#if conclusionReviewTarget}
+      <div class="info-block">
+        <p class="info-text">Experiment: <strong>{conclusionReviewTarget.title}</strong></p>
+        <p class="info-text">Type: <strong>{conclusionReviewTarget.experiment_type ?? '—'}</strong></p>
+        <p class="info-text">Requested: <strong>{conclusionReviewTarget.conclusion_requested_at ? new Date(conclusionReviewTarget.conclusion_requested_at).toLocaleString() : '—'}</strong></p>
+      </div>
+      <div class="field">
+        <span class="field-label">Final Notes</span>
+        <div class="readonly-block">{conclusionReviewTarget.final_notes ?? '—'}</div>
+      </div>
+      <div class="field">
+        <span class="field-label">Experiment Logs ({conclusionReviewLoading ? '…' : conclusionReviewLogs.length})</span>
+        {#if conclusionReviewLoading}
+          <p class="info-text">Loading logs…</p>
+        {:else if conclusionReviewLogs.length === 0}
+          <p class="info-text">No logs found.</p>
+        {:else}
+          <div class="logs-scroll">
+            {#each conclusionReviewLogs as log}
+              <div class="log-entry">
+                <span class="log-date">{log.log_date ?? '—'}</span>
+                {#if log.tests_performed}<p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>{/if}
+                {#if log.species_matter_tested}<p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>{/if}
+                {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <Field label="Decision" type="select" bind:value={conclusionDecision} options={[{value:'approve',label:'Approve'},{value:'reject',label:'Reject'}]} required />
+      <Field label="Review Notes (optional)" type="textarea" bind:value={conclusionReviewNotes} rows={3} />
+      <div class="form-actions">
+        <button class="btn-secondary" onclick={() => conclusionReviewOpen = false}>Cancel</button>
+        <button class="btn-danger" onclick={submitConclusionReview} disabled={!conclusionDecision}>
+          {conclusionDecision === 'approve' ? 'Approve Conclusion' : conclusionDecision === 'reject' ? 'Reject Conclusion' : 'Submit Decision'}
+        </button>
+      </div>
+    {/if}
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -418,4 +635,21 @@
   .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
   .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
   .token-remove:hover { color: #ff4466; }
+  .btn-conclude { border-color: #7c3aed; color: #a78bfa; }
+  .btn-conclude:hover { border-color: #a78bfa; color: #c4b5fd; }
+  .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+  .actions-cell { white-space: nowrap; display: flex; gap: 0.375rem; align-items: center; flex-wrap: wrap; }
+  .notes-preview { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8fa3cc; font-size: 0.8rem; }
+  .tab-badge { background: #7c3aed; border-radius: 10px; color: #fff; font-size: 0.6rem; font-weight: 700; margin-left: 4px; padding: 1px 6px; }
+  .info-block { background: rgba(61,127,255,0.05); border: 1px solid #1e2d4a; border-radius: 4px; display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem; }
+  .readonly-block { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #c8d8f0; font-size: 0.85rem; line-height: 1.6; min-height: 60px; padding: 0.625rem 0.875rem; white-space: pre-wrap; }
+  .logs-scroll { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 220px; overflow-y: auto; }
+  .log-entry { border-bottom: 1px solid #1e2d4a; padding: 0.5rem 0.75rem; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-date { color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.7rem; }
+  .log-field { color: #c8d8f0; font-size: 0.8rem; margin: 0.2rem 0 0; }
+  .badge-approved { background: rgba(0,200,83,0.12); color: #00c853; }
+  .badge-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
+  .badge-conclude { background: rgba(124,58,237,0.15); color: #a78bfa; }
 </style>
