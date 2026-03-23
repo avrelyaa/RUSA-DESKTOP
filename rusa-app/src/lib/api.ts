@@ -38,12 +38,12 @@ export const researchApi = {
     invoke<string>('propose_experiment', { token, title, description, experimentType, startDate, endDate }),
   reviewExperiment: (token: string, experimentId: string, status: string, notes?: string) =>
     invoke<void>('review_experiment', { token, experimentId, status, notes }),
-  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, notes?: string) =>
-    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, notes }),
+  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, linkedTestIds?: string, notes?: string) =>
+    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, linkedTestIds, notes }),
   getExperimentLogs: (token: string, experimentId: string) =>
     invoke<any[]>('get_experiment_logs', { token, experimentId }),
-  requestConclusion: (token: string, experimentId: string, finalNotes: string) =>
-    invoke<void>('request_experiment_conclusion', { token, experimentId, finalNotes }),
+  requestConclusion: (token: string, experimentId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
+    invoke<void>('request_experiment_conclusion', { token, experimentId, finalNotes, finalFindings, methodologySummary, keyResults, recommendations, limitations }),
   approveConclusion: (token: string, experimentId: string, decision: string, reviewNotes?: string) =>
     invoke<void>('approve_experiment_conclusion', { token, experimentId, decision, reviewNotes }),
   getSpeciesArchive: (token: string) => invoke<any[]>('get_species_archive', { token }),
@@ -54,6 +54,16 @@ export const researchApi = {
     invoke<string>('propose_test', { token, title, description, methodology }),
   reviewTest: (token: string, proposalId: string, status: string, notes?: string) =>
     invoke<void>('review_test_proposal', { token, proposalId, status, notes }),
+  linkTestsToLog: (token: string, logId: string, testIds: string[]) =>
+    invoke<void>('link_tests_to_log', { token, logId, testIds }),
+  proposeSpeciesFromDiscovery: (token: string, experimentId: string, speciesName: string, description?: string, classification?: string, habitat?: string) =>
+    invoke<string>('propose_species_from_discovery', { token, experimentId, speciesName, description, classification, habitat }),
+  getObserverDashboard: (token: string) =>
+    invoke<any>('get_observer_dashboard', { token }),
+  assignExperimentTask: (token: string, experimentId: string, assignedTo: string, title: string, dueDate?: string) =>
+    invoke<string>('assign_experiment_task', { token, experimentId, assignedTo, title, dueDate }),
+  getExperimentTasks: (token: string, experimentId: string) =>
+    invoke<any[]>('get_experiment_tasks', { token, experimentId }),
 };
 
 // Data Services

@@ -8,7 +8,7 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);
@@ -65,6 +65,11 @@
   let conclusionReqOpen = $state(false);
   let conclusionReqExp: any = $state(null);
   let conclusionFinalNotes = $state('');
+  let conclusionFinalFindings = $state('');
+  let conclusionMethodology = $state('');
+  let conclusionKeyResults = $state('');
+  let conclusionRecommendations = $state('');
+  let conclusionLimitations = $state('');
 
   // Conclusion review modal (for Taskmaster)
   let conclusionReviewOpen = $state(false);
@@ -74,6 +79,39 @@
   let conclusionReviewNotes = $state('');
   let conclusionReviewLoading = $state(false);
 
+  // Add Log modal
+  let logOpen = $state(false);
+  let logExp: any = $state(null);
+  let logDate = $state('');
+  let logPersonnel = $state('');
+  let logSpecies = $state('');
+  let logTestsText = $state('');
+  let logLinkedTestIds: string[] = $state([]);
+  let logNotes = $state('');
+  let logNewSpecies = $state(false);
+  let logNewSpeciesName = $state('');
+  let logNewSpeciesClass = $state('');
+  let logNewSpeciesHabitat = $state('');
+  let logNewSpeciesDesc = $state('');
+
+  // View Logs modal
+  let viewLogsOpen = $state(false);
+  let viewLogsExp: any = $state(null);
+  let viewLogsData: any[] = $state([]);
+  let viewLogsLoading = $state(false);
+
+  // Observer: Assign Experiment Task modal
+  let assignExpTaskOpen = $state(false);
+  let assignExpTaskExp: any = $state(null);
+  let assignExpTaskAssignee: any = $state(null);
+  let assignExpTaskAssigneeSearch = $state('');
+  let assignExpTaskTitle = $state('');
+  let assignExpTaskDue = $state('');
+
+  // Observer dashboard data
+  let observerDashboard: any = $state(null);
+  let observerDashboardLoading = $state(false);
+
   const canAssignResearchTasks = $derived(
     $session?.role_name === 'the_observer' ||
     $session?.role_name === 'the_artificer' ||
@@ -81,6 +119,7 @@
   );
 
   const isTaskmaster = $derived($session?.role_name === 'the_taskmaster');
+  const isObserver = $derived($session?.role_name === 'the_observer');
 
   const canReviewExperiment = $derived(
     $session?.role_name === 'the_observer' ||
@@ -90,6 +129,8 @@
 
   const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
 
+  const approvedTests = $derived(tests.filter((t: any) => t.status === 'approved'));
+
   function filteredAssignees(search: string): any[] {
     const q = search.toLowerCase();
     return allUsers.filter(u =>
@@ -98,6 +139,7 @@
   }
 
   let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
+  let assignExpTaskSuggestions = $derived(assignExpTaskAssigneeSearch.length > 0 ? filteredAssignees(assignExpTaskAssigneeSearch) : []);
 
   onMount(async () => {
     const s = $session;
@@ -207,14 +249,30 @@
   function openConclusionRequest(exp: any) {
     conclusionReqExp = exp;
     conclusionFinalNotes = exp.final_notes ?? '';
+    conclusionFinalFindings = exp.final_findings ?? '';
+    conclusionMethodology = exp.methodology_summary ?? '';
+    conclusionKeyResults = exp.key_results ?? '';
+    conclusionRecommendations = exp.recommendations ?? '';
+    conclusionLimitations = exp.limitations ?? '';
     conclusionReqOpen = true;
   }
 
   async function submitConclusionRequest() {
     const s = $session; if (!s || !conclusionReqExp) return;
-    if (!conclusionFinalNotes.trim()) { showToast('Final notes are required', 'error'); return; }
+    if (!conclusionFinalNotes.trim()) { showToast('Final summary is required', 'error'); return; }
+    if (!conclusionMethodology.trim()) { showToast('Methodology summary is required', 'error'); return; }
+    if (!conclusionKeyResults.trim()) { showToast('Key results are required', 'error'); return; }
     try {
-      await researchApi.requestConclusion(s.token, conclusionReqExp.id, conclusionFinalNotes);
+      await researchApi.requestConclusion(
+        s.token,
+        conclusionReqExp.id,
+        conclusionFinalNotes,
+        conclusionFinalFindings || undefined,
+        conclusionMethodology || undefined,
+        conclusionKeyResults || undefined,
+        conclusionRecommendations || undefined,
+        conclusionLimitations || undefined,
+      );
       showToast('Conclusion request submitted', 'success');
       conclusionReqOpen = false;
       experiments = await researchApi.getExperiments(s.token);
@@ -246,6 +304,136 @@
       experiments = await researchApi.getExperiments(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
+
+  function openAddLog(exp: any) {
+    logExp = exp;
+    logDate = new Date().toISOString().slice(0, 16);
+    logPersonnel = '';
+    logSpecies = '';
+    logTestsText = '';
+    logLinkedTestIds = [];
+    logNotes = '';
+    logNewSpecies = false;
+    logNewSpeciesName = '';
+    logNewSpeciesClass = '';
+    logNewSpeciesHabitat = '';
+    logNewSpeciesDesc = '';
+    logOpen = true;
+  }
+
+  function toggleTestLink(testId: string) {
+    if (logLinkedTestIds.includes(testId)) {
+      logLinkedTestIds = logLinkedTestIds.filter(id => id !== testId);
+    } else {
+      logLinkedTestIds = [...logLinkedTestIds, testId];
+    }
+  }
+
+  async function submitLog() {
+    const s = $session; if (!s || !logExp) return;
+    if (!logDate) { showToast('Log date is required', 'error'); return; }
+    try {
+      const dateVal = logDate.includes('T') ? new Date(logDate).toISOString() : new Date(logDate + 'T00:00:00Z').toISOString();
+      const linkedJson = logLinkedTestIds.length > 0 ? JSON.stringify(logLinkedTestIds) : undefined;
+      const logId = await researchApi.addLog(
+        s.token, logExp.id, dateVal,
+        logPersonnel || undefined,
+        logSpecies || undefined,
+        logTestsText || undefined,
+        linkedJson,
+        logNotes || undefined,
+      );
+
+      // If new species discovered, create proposal
+      if (logNewSpecies && logNewSpeciesName.trim()) {
+        try {
+          await researchApi.proposeSpeciesFromDiscovery(
+            s.token, logExp.id, logNewSpeciesName,
+            logNewSpeciesDesc || undefined,
+            logNewSpeciesClass || undefined,
+            logNewSpeciesHabitat || undefined,
+          );
+          showToast('New species discovery proposed for archive', 'success');
+          species = await researchApi.getSpeciesArchive(s.token);
+        } catch (se: any) {
+          showToast('Log saved but species proposal failed: ' + se, 'error');
+        }
+      }
+
+      showToast('Log entry added', 'success');
+      logOpen = false;
+      experiments = await researchApi.getExperiments(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function openViewLogs(exp: any) {
+    const s = $session; if (!s) return;
+    viewLogsExp = exp;
+    viewLogsData = [];
+    viewLogsLoading = true;
+    viewLogsOpen = true;
+    try {
+      viewLogsData = await researchApi.getExperimentLogs(s.token, exp.id);
+    } catch (_e: any) {
+      viewLogsData = [];
+    }
+    viewLogsLoading = false;
+  }
+
+  function getLinkedTestNames(linkedTestIds: string | null): string {
+    if (!linkedTestIds) return '';
+    try {
+      const ids: string[] = JSON.parse(linkedTestIds);
+      if (!Array.isArray(ids)) return linkedTestIds;
+      return ids.map(id => {
+        const t = tests.find((t: any) => t.id === id);
+        return t ? t.title : id.slice(0, 8) + '…';
+      }).join(', ');
+    } catch {
+      return linkedTestIds;
+    }
+  }
+
+  function openAssignExpTask(exp: any) {
+    assignExpTaskExp = exp;
+    assignExpTaskAssignee = null;
+    assignExpTaskAssigneeSearch = '';
+    assignExpTaskTitle = '';
+    assignExpTaskDue = '';
+    assignExpTaskOpen = true;
+  }
+
+  async function submitAssignExpTask() {
+    const s = $session; if (!s || !assignExpTaskExp) return;
+    if (!assignExpTaskAssignee || !assignExpTaskTitle.trim()) { showToast('Assignee and title required', 'error'); return; }
+    try {
+      await researchApi.assignExperimentTask(
+        s.token,
+        assignExpTaskExp.id,
+        assignExpTaskAssignee.id,
+        assignExpTaskTitle,
+        assignExpTaskDue ? new Date(assignExpTaskDue).toISOString() : undefined,
+      );
+      showToast('Task assigned', 'success');
+      assignExpTaskOpen = false;
+      if (observerDashboard) await loadObserverDashboard();
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function loadObserverDashboard() {
+    const s = $session; if (!s) return;
+    observerDashboardLoading = true;
+    try {
+      observerDashboard = await researchApi.getObserverDashboard(s.token);
+    } catch (e: any) { showToast('Failed to load dashboard: ' + e, 'error'); }
+    observerDashboardLoading = false;
+  }
+
+  $effect(() => {
+    if (activeTab === 'observer_dashboard' && isObserver && !observerDashboard) {
+      loadObserverDashboard();
+    }
+  });
 
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
@@ -279,6 +467,7 @@
     { key: 'name', label: 'Name' },
     { key: 'classification', label: 'Classification' },
     { key: 'habitat', label: 'Habitat' },
+    { key: 'approval_status', label: 'Status' },
   ];
   const testCols = [
     { key: 'title', label: 'Title' },
@@ -305,6 +494,11 @@
     {#if isTaskmaster}
       <button class="tab" class:active={activeTab==='pending_conclusions'} onclick={() => activeTab='pending_conclusions'}>
         Pending Conclusions {#if pendingConclusions.length > 0}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
+      </button>
+    {/if}
+    {#if isObserver}
+      <button class="tab" class:active={activeTab==='observer_dashboard'} onclick={() => activeTab='observer_dashboard'}>
+        Observer Dashboard
       </button>
     {/if}
   </div>
@@ -343,8 +537,15 @@
                 </td>
                 <td>{exp.start_date ? new Date(exp.start_date).toLocaleDateString() : '—'}</td>
                 <td class="actions-cell">
+                  <button class="btn-small" onclick={() => openViewLogs(exp)}>View Logs</button>
+                  {#if exp.status === 'in_progress' || exp.status === 'approved'}
+                    <button class="btn-small btn-add" onclick={() => openAddLog(exp)}>+ Log</button>
+                  {/if}
                   {#if canReviewExperiment}
                     <button class="btn-small" onclick={() => openReview(exp, 'experiment')}>Review</button>
+                  {/if}
+                  {#if isObserver}
+                    <button class="btn-small btn-observer" onclick={() => openAssignExpTask(exp)}>Assign Task</button>
                   {/if}
                   {#if exp.status === 'in_progress' && exp.proposed_by === $session?.user_id}
                     <button class="btn-small btn-conclude" onclick={() => openConclusionRequest(exp)}>Request Conclusion</button>
@@ -364,7 +565,46 @@
       <h2 class="section-title">Species Archive</h2>
       <button class="btn-primary" onclick={() => speciesOpen = true}>+ Add Species</button>
     </div>
-    <Table columns={speciesCols} rows={species} />
+    {#if species.length === 0}
+      <p class="empty">No species in archive.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Classification</th>
+              <th>Habitat</th>
+              <th>Archive Status</th>
+              <th>Discovery Experiment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each species as sp}
+              <tr>
+                <td>{sp.name}</td>
+                <td>{sp.classification ?? '—'}</td>
+                <td>{sp.habitat ?? '—'}</td>
+                <td>
+                  {#if sp.approval_status === 'pending_approval'}
+                    <span class="badge badge-conclude">Pending Approval</span>
+                  {:else}
+                    <span class="badge badge-done">{sp.approval_status ?? 'Approved'}</span>
+                  {/if}
+                </td>
+                <td>
+                  {#if sp.discovery_experiment_id}
+                    {experiments.find((e: any) => e.id === sp.discovery_experiment_id)?.title ?? sp.discovery_experiment_id.slice(0,8) + '…'}
+                  {:else}
+                    —
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {:else if activeTab === 'tests'}
     <div class="section-bar">
       <h2 class="section-title">Test Archive</h2>
@@ -446,6 +686,84 @@
           </tbody>
         </table>
       </div>
+    {/if}
+  {:else if activeTab === 'observer_dashboard'}
+    <div class="section-bar">
+      <h2 class="section-title">Observer Dashboard</h2>
+      <button class="btn-secondary" onclick={loadObserverDashboard}>↻ Refresh</button>
+    </div>
+    {#if observerDashboardLoading}
+      <p class="loading">Loading dashboard…</p>
+    {:else if observerDashboard}
+      <div class="dashboard-section">
+        <h3 class="subsection-title">Active Experiments</h3>
+        {#if observerDashboard.active_experiments?.length === 0}
+          <p class="empty">No active experiments.</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Days Elapsed</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each observerDashboard.active_experiments as exp}
+                  <tr>
+                    <td>{exp.title}</td>
+                    <td>{exp.experiment_type ?? '—'}</td>
+                    <td><span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span></td>
+                    <td>{exp.days_elapsed ?? 0} days</td>
+                    <td>
+                      <button class="btn-small btn-observer" onclick={() => openAssignExpTask(exp)}>+ Assign Task</button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+      <div class="dashboard-section">
+        <h3 class="subsection-title">Tasks I've Assigned</h3>
+        {#if observerDashboard.assigned_tasks?.length === 0}
+          <p class="empty">No tasks assigned yet.</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Task Title</th>
+                  <th>Status</th>
+                  <th>Due Date</th>
+                  <th>Experiment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each observerDashboard.assigned_tasks as task}
+                  <tr>
+                    <td>{task.title}</td>
+                    <td>
+                      <span class="badge {task.status === 'completed' ? 'badge-done' : task.status === 'in_progress' ? 'badge-progress' : 'badge-open'}">{task.status}</span>
+                      {#if task.due_date && new Date(task.due_date) < new Date() && task.status !== 'completed'}
+                        <span class="badge badge-rejected" style="margin-left:4px">Overdue</span>
+                      {/if}
+                    </td>
+                    <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                    <td>{observerDashboard.active_experiments?.find((e: any) => e.id === task.experiment_id)?.title ?? '—'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <p class="empty">Dashboard not loaded.</p>
     {/if}
   {/if}
 </PageShell>
@@ -548,7 +866,12 @@
       <p class="info-text">Experiment: <strong>{conclusionReqExp?.title}</strong></p>
       <p class="info-text">Started: <strong>{conclusionReqExp?.start_date ? new Date(conclusionReqExp.start_date).toLocaleDateString() : '—'}</strong></p>
     </div>
-    <Field label="Final Findings / Summary" type="textarea" bind:value={conclusionFinalNotes} rows={6} required hint="Provide a complete summary of the experiment findings before requesting conclusion." />
+    <Field label="Executive Summary" type="textarea" bind:value={conclusionFinalNotes} rows={4} required hint="High-level summary of the experiment outcome." />
+    <Field label="Methodology Summary" type="textarea" bind:value={conclusionMethodology} rows={3} required hint="How the experiment was conducted." />
+    <Field label="Key Results / Findings" type="textarea" bind:value={conclusionKeyResults} rows={3} required hint="Main findings and results observed." />
+    <Field label="Final Findings (Detail)" type="textarea" bind:value={conclusionFinalFindings} rows={3} hint="Detailed findings and statistical results (if applicable)." />
+    <Field label="Recommendations" type="textarea" bind:value={conclusionRecommendations} rows={3} hint="Suggested next steps or actions." />
+    <Field label="Limitations" type="textarea" bind:value={conclusionLimitations} rows={3} hint="Known limitations or caveats of the experiment." />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => conclusionReqOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitConclusionRequest}>Request Conclusion</button>
@@ -565,9 +888,39 @@
         <p class="info-text">Requested: <strong>{conclusionReviewTarget.conclusion_requested_at ? new Date(conclusionReviewTarget.conclusion_requested_at).toLocaleString() : '—'}</strong></p>
       </div>
       <div class="field">
-        <span class="field-label">Final Notes</span>
+        <span class="field-label">Executive Summary</span>
         <div class="readonly-block">{conclusionReviewTarget.final_notes ?? '—'}</div>
       </div>
+      {#if conclusionReviewTarget.methodology_summary}
+        <div class="field">
+          <span class="field-label">Methodology</span>
+          <div class="readonly-block">{conclusionReviewTarget.methodology_summary}</div>
+        </div>
+      {/if}
+      {#if conclusionReviewTarget.key_results}
+        <div class="field">
+          <span class="field-label">Key Results</span>
+          <div class="readonly-block">{conclusionReviewTarget.key_results}</div>
+        </div>
+      {/if}
+      {#if conclusionReviewTarget.final_findings}
+        <div class="field">
+          <span class="field-label">Final Findings</span>
+          <div class="readonly-block">{conclusionReviewTarget.final_findings}</div>
+        </div>
+      {/if}
+      {#if conclusionReviewTarget.recommendations}
+        <div class="field">
+          <span class="field-label">Recommendations</span>
+          <div class="readonly-block">{conclusionReviewTarget.recommendations}</div>
+        </div>
+      {/if}
+      {#if conclusionReviewTarget.limitations}
+        <div class="field">
+          <span class="field-label">Limitations</span>
+          <div class="readonly-block">{conclusionReviewTarget.limitations}</div>
+        </div>
+      {/if}
       <div class="field">
         <span class="field-label">Experiment Logs ({conclusionReviewLoading ? '…' : conclusionReviewLogs.length})</span>
         {#if conclusionReviewLoading}
@@ -579,7 +932,11 @@
             {#each conclusionReviewLogs as log}
               <div class="log-entry">
                 <span class="log-date">{log.log_date ?? '—'}</span>
-                {#if log.tests_performed}<p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>{/if}
+                {#if log.linked_test_ids}
+                  <p class="log-field"><strong>Tests Performed:</strong> {getLinkedTestNames(log.linked_test_ids)}</p>
+                {:else if log.tests_performed}
+                  <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
+                {/if}
                 {#if log.species_matter_tested}<p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>{/if}
                 {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
               </div>
@@ -599,12 +956,131 @@
   </div>
 </Modal>
 
+<!-- Add Daily Log Modal -->
+<Modal bind:open={logOpen} title="Add Daily Log — {logExp?.title ?? ''}">
+  <div class="form">
+    <Field label="Log Date" type="datetime-local" bind:value={logDate} required />
+    <Field label="Personnel Present" bind:value={logPersonnel} placeholder="Names of team members attending" />
+    <Field label="Species / Matter Tested" bind:value={logSpecies} placeholder="What was tested today" />
+
+    <div class="field">
+      <span class="field-label">Tests Performed (select from approved tests)</span>
+      {#if approvedTests.length === 0}
+        <p class="info-text">No approved tests available. Use free text below.</p>
+      {:else}
+        <div class="test-checklist">
+          {#each approvedTests as t}
+            <label class="test-check-item">
+              <input type="checkbox" checked={logLinkedTestIds.includes(t.id)} onchange={() => toggleTestLink(t.id)} />
+              <span class="test-check-label">{t.title}</span>
+              {#if t.methodology}<span class="test-check-meta">{t.methodology.slice(0, 60)}{t.methodology.length > 60 ? '…' : ''}</span>{/if}
+            </label>
+          {/each}
+        </div>
+      {/if}
+      <input class="field-input" style="margin-top:0.4rem" bind:value={logTestsText} placeholder="Or describe tests in free text…" />
+    </div>
+
+    <Field label="Notes / Progress" type="textarea" bind:value={logNotes} rows={3} />
+
+    <div class="field">
+      <label class="discovery-toggle">
+        <input type="checkbox" bind:checked={logNewSpecies} />
+        <span class="field-label" style="display:inline">New species/matter discovered in this log</span>
+      </label>
+    </div>
+
+    {#if logNewSpecies}
+      <div class="discovery-form">
+        <p class="discovery-label">New Discovery Details</p>
+        <Field label="Species / Matter Name" bind:value={logNewSpeciesName} required />
+        <Field label="Classification" bind:value={logNewSpeciesClass} />
+        <Field label="Habitat" bind:value={logNewSpeciesHabitat} />
+        <Field label="Description" type="textarea" bind:value={logNewSpeciesDesc} rows={2} />
+      </div>
+    {/if}
+
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => logOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitLog}>Save Log</button>
+    </div>
+  </div>
+</Modal>
+
+<!-- View Logs Modal -->
+<Modal bind:open={viewLogsOpen} title="Logs — {viewLogsExp?.title ?? ''}">
+  <div class="form">
+    {#if viewLogsLoading}
+      <p class="info-text">Loading logs…</p>
+    {:else if viewLogsData.length === 0}
+      <p class="empty">No log entries yet for this experiment.</p>
+    {:else}
+      <div class="logs-scroll" style="max-height:400px">
+        {#each viewLogsData as log}
+          <div class="log-entry">
+            <div class="log-header">
+              <span class="log-date">{log.log_date ?? '—'}</span>
+              {#if log.personnel_present}<span class="log-personnel">👥 {log.personnel_present}</span>{/if}
+            </div>
+            {#if log.linked_test_ids}
+              <p class="log-field"><strong>Tests Linked:</strong> <span class="test-linked">{getLinkedTestNames(log.linked_test_ids)}</span></p>
+            {:else if log.tests_performed}
+              <p class="log-field"><strong>Tests:</strong> {log.tests_performed}</p>
+            {/if}
+            {#if log.species_matter_tested}<p class="log-field"><strong>Subject:</strong> {log.species_matter_tested}</p>{/if}
+            {#if log.notes}<p class="log-field">{log.notes}</p>{/if}
+            {#if log.new_species_proposed}<p class="log-field discovery-badge">🔬 New species proposed to archive</p>{/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => viewLogsOpen = false}>Close</button>
+    </div>
+  </div>
+</Modal>
+
+<!-- Observer: Assign Experiment Task Modal -->
+<Modal bind:open={assignExpTaskOpen} title="Assign Task to Experiment">
+  <div class="form">
+    <div class="info-block">
+      <p class="info-text">Experiment: <strong>{assignExpTaskExp?.title ?? '—'}</strong></p>
+    </div>
+    <div class="field">
+      <label class="field-label">Assign To</label>
+      <div class="assignee-autocomplete">
+        {#if assignExpTaskAssignee}
+          <span class="token">{assignExpTaskAssignee.full_name || assignExpTaskAssignee.username}<button class="token-remove" onclick={() => { assignExpTaskAssignee = null; assignExpTaskAssigneeSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={assignExpTaskAssigneeSearch} placeholder="Search by name or username…" />
+            {#if assignExpTaskSuggestions.length > 0}
+              <div class="suggestions">
+                {#each assignExpTaskSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { assignExpTaskAssignee = u; assignExpTaskAssigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+    <Field label="Task Title" bind:value={assignExpTaskTitle} required />
+    <Field label="Due Date" type="datetime-local" bind:value={assignExpTaskDue} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => assignExpTaskOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitAssignExpTask}>Assign Task</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
   .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
   .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
   .section-title { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .subsection-title { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; margin: 1.5rem 0 0.75rem; }
   .loading { color: #4a5d82; padding: 2rem 0; }
   .info-text { font-size: 0.85rem; color: #8fa3cc; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
@@ -613,6 +1089,10 @@
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-small { background: none; border: 1px solid #1e2d4a; border-radius: 3px; color: #8fa3cc; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.625rem; }
   .btn-small:hover { border-color: #3d7fff; color: #3d7fff; }
+  .btn-add { border-color: #00c853; color: #00c853; }
+  .btn-add:hover { border-color: #00e676; color: #00e676; }
+  .btn-observer { border-color: #f59e0b; color: #f59e0b; }
+  .btn-observer:hover { border-color: #fbbf24; color: #fbbf24; }
   .table-wrap { overflow-x: auto; }
   .data-table { width: 100%; border-collapse: collapse; font-family: 'Outfit', sans-serif; font-size: 0.85rem; }
   .data-table th { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em; padding: 0.5rem 0.75rem; text-align: left; text-transform: uppercase; border-bottom: 1px solid #1e2d4a; }
@@ -624,6 +1104,7 @@
   .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
   .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-size: 0.85rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .assignee-autocomplete { position: relative; }
   .autocomplete-wrap { position: relative; }
@@ -647,9 +1128,22 @@
   .logs-scroll { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 220px; overflow-y: auto; }
   .log-entry { border-bottom: 1px solid #1e2d4a; padding: 0.5rem 0.75rem; }
   .log-entry:last-child { border-bottom: none; }
+  .log-header { display: flex; gap: 1rem; align-items: baseline; margin-bottom: 0.2rem; }
   .log-date { color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.7rem; }
+  .log-personnel { color: #8fa3cc; font-size: 0.75rem; }
   .log-field { color: #c8d8f0; font-size: 0.8rem; margin: 0.2rem 0 0; }
+  .test-linked { color: #a78bfa; }
   .badge-approved { background: rgba(0,200,83,0.12); color: #00c853; }
   .badge-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
   .badge-conclude { background: rgba(124,58,237,0.15); color: #a78bfa; }
+  .test-checklist { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 150px; overflow-y: auto; padding: 0.375rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .test-check-item { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.25rem 0.375rem; border-radius: 3px; }
+  .test-check-item:hover { background: rgba(61,127,255,0.06); }
+  .test-check-label { color: #c8d8f0; font-size: 0.85rem; }
+  .test-check-meta { color: #4a5d82; font-size: 0.75rem; margin-left: auto; }
+  .discovery-toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+  .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
+  .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+  .discovery-badge { background: rgba(0,200,83,0.08); border-radius: 3px; color: #00c853; display: inline-block; font-size: 0.8rem; padding: 2px 6px; }
+  .dashboard-section { margin-bottom: 2rem; }
 </style>
