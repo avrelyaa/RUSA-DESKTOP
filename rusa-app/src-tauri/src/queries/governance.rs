@@ -80,14 +80,6 @@ pub async fn insert_vote_typed(
     initiated_by: Uuid,
     vote_type: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    // Ensure vote_type column exists (added by migration 007, but guard for safety)
-    let _ = sqlx::query(
-        "ALTER TABLE votes ADD COLUMN IF NOT EXISTS vote_type VARCHAR(50) DEFAULT 'pressing_issue' \
-         CHECK (vote_type IN ('general', 'budget', 'pressing_issue'))",
-    )
-    .execute(get_db())
-    .await;
-
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO votes (title, description, status, initiated_by, deadline, vote_type) \
          VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes',$4) RETURNING id",

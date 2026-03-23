@@ -32,13 +32,6 @@ pub async fn review_budget_request(
 
     // Budget requests require a passed directors' vote before approval
     if status == "approved" {
-        // Ensure requires_vote column exists (guard for legacy installs)
-        let _ = sqlx::query(
-            "ALTER TABLE budget_requests ADD COLUMN IF NOT EXISTS requires_vote BOOLEAN NOT NULL DEFAULT TRUE",
-        )
-        .execute(crate::db::get_db())
-        .await;
-
         let vote_status = budget_queries::get_budget_request_vote_status(rid)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
@@ -100,14 +93,6 @@ pub async fn initiate_budget_vote(
     .await
     .map_err(|e| format!("DB error: {}", e))?
     .ok_or_else(|| "Budget request not found".to_string())?;
-
-    // Ensure vote_type column exists
-    let _ = sqlx::query(
-        "ALTER TABLE votes ADD COLUMN IF NOT EXISTS vote_type VARCHAR(50) DEFAULT 'pressing_issue' \
-         CHECK (vote_type IN ('general', 'budget', 'pressing_issue'))",
-    )
-    .execute(crate::db::get_db())
-    .await;
 
     let vote_title = format!("Budget Request Vote: {}", req.title);
     let vote_desc = format!(
