@@ -290,8 +290,8 @@ export const governanceApi = {
   getVotes: (token: string) => invoke<any[]>('get_votes', { token }),
   getVoteDetails: (token: string, voteId: string) => invoke<any>('get_vote_details', { token, voteId }),
   interruptVote: (token: string, voteId: string) => invoke<void>('interrupt_vote', { token, voteId }),
-  createMeeting: (token: string, title: string, description?: string, scheduledAt?: string, location?: string, attendeeIds?: string[]) =>
-    invoke<string>('create_meeting', { token, title, description, scheduledAt, location, attendeeIds }),
+  createMeeting: (token: string, title: string, description?: string, scheduledAt?: string, location?: string, attendeeIds?: string[], toIds?: string[], ccIds?: string[], bccIds?: string[]) =>
+    invoke<string>('create_meeting', { token, title, description, scheduledAt, location, attendeeIds: attendeeIds ?? [], toIds: toIds ?? [], ccIds: ccIds ?? [], bccIds: bccIds ?? [] }),
   getMeetings: (token: string) => invoke<any[]>('get_meetings', { token }),
   relocateStaff: (token: string, staffId: string, toLocation: string, relocationType: string, startDate?: string, endDate?: string, reason?: string) =>
     invoke<string>('relocate_staff', { token, staffId, toLocation, relocationType, startDate, endDate, reason }),

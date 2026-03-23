@@ -111,13 +111,24 @@ pub async fn create_meeting(
     scheduled_at: String,
     location: Option<String>,
     attendee_ids: Vec<String>,
+    to_ids: Vec<String>,
+    cc_ids: Vec<String>,
+    bcc_ids: Vec<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     require_role(&session, 3)?;
 
+    if to_ids.is_empty() {
+        return Err("At least one To recipient is required".to_string());
+    }
+
     let sched = chrono::DateTime::parse_from_rfc3339(&scheduled_at)
         .map(|d| d.with_timezone(&chrono::Utc))
         .map_err(|_| "Invalid scheduled_at format".to_string())?;
+
+    let to_json = serde_json::to_value(&to_ids).unwrap_or(serde_json::json!([]));
+    let cc_json = serde_json::to_value(&cc_ids).unwrap_or(serde_json::json!([]));
+    let bcc_json = serde_json::to_value(&bcc_ids).unwrap_or(serde_json::json!([]));
 
     let meeting_id = governance_queries::insert_meeting(
         &title,
@@ -125,17 +136,30 @@ pub async fn create_meeting(
         sched,
         location.as_deref(),
         session.user_id,
+        &to_json,
+        &cc_json,
+        &bcc_json,
     )
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    for aid_str in &attendee_ids {
+    // Insert attendees from all recipient lists (to + cc + bcc) as well as explicit attendee_ids
+    let all_attendee_ids: Vec<String> = attendee_ids.iter()
+        .chain(to_ids.iter())
+        .chain(cc_ids.iter())
+        .chain(bcc_ids.iter())
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    for aid_str in &all_attendee_ids {
         if let Ok(aid) = Uuid::parse_str(aid_str) {
             let _ = governance_queries::insert_meeting_attendee(meeting_id, aid).await;
         }
     }
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_MEETING", Some("meetings"), Some(meeting_id), None, Some(serde_json::json!({ "title": title }))).await;
+    let _ = write_audit_log(Some(session.user_id), "CREATE_MEETING", Some("meetings"), Some(meeting_id), None, Some(serde_json::json!({ "title": title, "to": to_ids, "cc": cc_ids, "bcc": bcc_ids }))).await;
     Ok(meeting_id.to_string())
 }
 
