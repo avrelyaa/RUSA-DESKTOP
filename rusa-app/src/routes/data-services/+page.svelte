@@ -47,6 +47,11 @@
   let rejectReq: any = $state(null);
   let rejectionReason = $state('');
 
+  // Statistician delivery
+  let deliverOpen = $state(false);
+  let deliverReq: any = $state(null);
+  let deliveryNotes = $state('');
+
   const role = $derived($session?.role_name ?? '');
 
   function initTab() {
@@ -152,16 +157,60 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
-  async function deliver(req: any) {
-    const s = $session; if (!s) return;
+  function openDeliver(req: any) {
+    deliverReq = req; deliveryNotes = '';
+    deliverOpen = true;
+  }
+
+  async function doDeliver() {
+    const s = $session; if (!s || !deliverReq) return;
     try {
-      await dataApi.deliver(s.token, req.id);
+      await dataApi.deliver(s.token, deliverReq.id, deliveryNotes || undefined);
       showToast('Delivered to requester', 'success');
+      deliverOpen = false;
       await reload();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
   // ---- Analysis tools ----
+  function downloadResponse(req: any) {
+    const filename = req.title.replace(/[^a-z0-9]/gi, '_').toLowerCase().slice(0, 80) + '_response.txt';
+    const lines: string[] = [];
+    lines.push('DATA REQUEST RESPONSE');
+    lines.push('=====================');
+    lines.push('Title: ' + req.title);
+    lines.push('Type: ' + (req.data_type || '—'));
+    lines.push('Delivered: ' + (req.delivered_at ? new Date(req.delivered_at).toLocaleString() : '—'));
+    lines.push('');
+    lines.push('RESPONSE DATA');
+    lines.push('-------------');
+    lines.push(req.response_data || '—');
+    if (req.analyst_notes) {
+      lines.push('');
+      lines.push('ANALYST NOTES');
+      lines.push('-------------');
+      lines.push(req.analyst_notes);
+    }
+    if (req.review_notes) {
+      lines.push('');
+      lines.push('STATISTICIAN REVIEW NOTES');
+      lines.push('-------------------------');
+      lines.push(req.review_notes);
+    }
+    if (req.delivery_notes) {
+      lines.push('');
+      lines.push('DELIVERY MESSAGE FROM STATISTICIAN');
+      lines.push('----------------------------------');
+      lines.push(req.delivery_notes);
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
   function parseData(): string[][] {
     const lines = rawData.trim().split('\n').filter(l => l.trim());
     return lines.map(l => l.split(',').map(c => c.trim()));
@@ -286,7 +335,8 @@
   const approvedForAnalyst = $derived(requests.filter(r => r.status === 'approved' || r.status === 'processing'));
   const submittedByAnalyst = $derived(requests.filter(r => r.status === 'analyst_submitted'));
   const rejectedByAnalyst = $derived(requests.filter(r => r.status === 'analyst_rejected'));
-  const myRequests = $derived(requests);
+  const myActiveRequests = $derived(requests.filter(r => r.status !== 'delivered'));
+  const myDeliveredRequests = $derived(requests.filter(r => r.status === 'delivered'));
 
   const analystUsers = $derived(allUsers.filter(u => u.role_name === 'data_analyst'));
 
@@ -355,7 +405,7 @@
             <span class="req-desc response-preview">{req.response_data || '—'}</span>
           </div>
           <div class="req-actions">
-            <button class="btn-primary" onclick={() => deliver(req)}>Deliver to Requester</button>
+            <button class="btn-primary" onclick={() => openDeliver(req)}>Deliver to Requester</button>
           </div>
         </div>
       {/each}
@@ -490,27 +540,77 @@
 
   {:else}
     <!-- ===== ALL OTHER ROLES VIEW ===== -->
-    <div class="section-bar">
-      <h2 class="section-title">My Data Requests</h2>
-      <button class="btn-primary" onclick={() => createOpen = true}>+ New Request</button>
+    <div class="tabs-bar">
+      <button class="tab" class:active={activeTab==='mine'} onclick={() => activeTab='mine'}>My Requests <span class="badge">{myActiveRequests.length}</span></button>
+      <button class="tab" class:active={activeTab==='results'} onclick={() => activeTab='results'}>Results <span class="badge">{myDeliveredRequests.length}</span></button>
     </div>
-    {#if loading}
-      <p class="loading">Loading...</p>
-    {:else if myRequests.length === 0}
-      <p class="empty">No requests submitted yet</p>
-    {:else}
-      {#each myRequests as req}
-        <div class="req-card">
-          <div class="req-info">
-            <span class="req-title">{req.title}</span>
-            <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
-            <span class="req-meta">{req.data_type || ''} · {req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}</span>
-            {#if req.response_data}
-              <span class="req-desc">Response: {req.response_data}</span>
-            {/if}
+
+    {#if activeTab === 'mine'}
+      <div class="section-bar">
+        <h2 class="section-title">My Data Requests</h2>
+        <button class="btn-primary" onclick={() => createOpen = true}>+ New Request</button>
+      </div>
+      {#if loading}
+        <p class="loading">Loading...</p>
+      {:else if myActiveRequests.length === 0}
+        <p class="empty">No requests submitted yet</p>
+      {:else}
+        {#each myActiveRequests as req}
+          <div class="req-card">
+            <div class="req-info">
+              <span class="req-title">{req.title}</span>
+              <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
+              <span class="req-meta">{req.data_type || ''} · {req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}</span>
+              <span class="req-desc">{req.description || ''}</span>
+            </div>
           </div>
-        </div>
-      {/each}
+        {/each}
+      {/if}
+
+    {:else if activeTab === 'results'}
+      <div class="section-bar">
+        <h2 class="section-title">Delivered Results</h2>
+      </div>
+      {#if loading}
+        <p class="loading">Loading...</p>
+      {:else if myDeliveredRequests.length === 0}
+        <p class="empty">No delivered results yet. Results will appear here once The Statistician has reviewed and delivered your request.</p>
+      {:else}
+        {#each myDeliveredRequests as req}
+          <div class="req-card result-card">
+            <div class="req-info">
+              <span class="req-title">{req.title}</span>
+              <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
+              <span class="req-meta">{req.data_type || ''} · Delivered: {req.delivered_at ? new Date(req.delivered_at).toLocaleString() : '—'}</span>
+              <div class="result-section">
+                <span class="result-label">Response Data</span>
+                <pre class="result-data" role="region" aria-label="Response data" tabindex="0">{req.response_data || '—'}</pre>
+              </div>
+              {#if req.analyst_notes}
+                <div class="result-section">
+                  <span class="result-label">Analyst Notes</span>
+                  <p class="result-notes">{req.analyst_notes}</p>
+                </div>
+              {/if}
+              {#if req.review_notes}
+                <div class="result-section">
+                  <span class="result-label">Statistician Review Notes</span>
+                  <p class="result-notes">{req.review_notes}</p>
+                </div>
+              {/if}
+              {#if req.delivery_notes}
+                <div class="result-section">
+                  <span class="result-label">Delivery Message</span>
+                  <p class="result-notes">{req.delivery_notes}</p>
+                </div>
+              {/if}
+            </div>
+            <div class="req-actions">
+              <button class="btn-download" onclick={() => downloadResponse(req)}>⬇ Download</button>
+            </div>
+          </div>
+        {/each}
+      {/if}
     {/if}
   {/if}
 
@@ -581,6 +681,28 @@
   </div>
 </Modal>
 
+<!-- Statistician Deliver Modal -->
+<Modal bind:open={deliverOpen} title="Deliver: {deliverReq?.title}">
+  <div class="form">
+    <p class="req-meta">Status: <strong>{deliverReq?.status}</strong></p>
+    <p class="req-desc">{deliverReq?.description || ''}</p>
+    {#if deliverReq?.response_data}
+      <div class="deliver-preview">
+        <span class="result-label">Response Data Preview</span>
+        <pre class="result-data" role="region" aria-label="Response data preview" tabindex="0">{deliverReq.response_data}</pre>
+      </div>
+    {/if}
+    {#if deliverReq?.analyst_notes}
+      <p class="req-meta">Analyst notes: {deliverReq.analyst_notes}</p>
+    {/if}
+    <Field label="Delivery Message (optional)" type="textarea" bind:value={deliveryNotes} placeholder="Add a summary or message for the requester" />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => deliverOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={doDeliver}>Confirm Delivery</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs-bar { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; padding: 0.6rem 1rem; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 0.4rem; }
@@ -606,6 +728,14 @@
   .badge-submitted { background: rgba(180,130,255,0.1); color: #b482ff; }
   .badge-analyst-rejected { background: rgba(255,140,0,0.12); color: #ff8c00; }
   .badge-delivered { background: rgba(0,200,100,0.1); color: #00c864; }
+  .result-card { flex-direction: column; align-items: stretch; }
+  .result-section { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; }
+  .result-label { font-family: 'Space Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .result-data { background: #080d1a; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Space Mono', monospace; font-size: 0.78rem; margin: 0; padding: 0.75rem; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+  .result-data:focus { outline: 1px solid #3d7fff; }
+  .deliver-preview { display: flex; flex-direction: column; gap: 0.25rem; }
+  .result-notes { color: #8fa3cc; font-size: 0.82rem; margin: 0; }
+  .btn-download { background: none; border: 1px solid #00c864; border-radius: 4px; color: #00c864; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; padding: 0.5rem 1rem; white-space: nowrap; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
