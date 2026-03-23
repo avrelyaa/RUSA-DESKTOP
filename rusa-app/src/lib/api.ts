@@ -191,6 +191,8 @@ export const stationApi = {
   getFindings: (token: string, stationId?: string) => invoke<any[]>('get_station_findings', { token, stationId }),
   submitSupplyRequest: (token: string, stationId: string, title: string, items?: string, totalCost?: number) =>
     invoke<string>('submit_station_supply_request', { token, stationId, title, items, totalCost }),
+  getStationSupplyRequests: (token: string, stationId?: string) =>
+    invoke<any[]>('get_station_supply_requests', { token, stationId }),
   reviewSupplyRequest: (token: string, requestId: string, decision: string, notes?: string) =>
     invoke<void>('review_station_supply_request', { token, requestId, decision, notes }),
   submitAbandonment: (token: string, stationId: string, reason: string) =>

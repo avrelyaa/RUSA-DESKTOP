@@ -138,6 +138,7 @@ pub fn run() {
             commands::station_commands::get_personnel_log,
             commands::station_commands::submit_station_findings,
             commands::station_commands::get_station_findings,
+            commands::station_commands::get_station_supply_requests,
             commands::station_commands::submit_station_supply_request,
             commands::station_commands::review_station_supply_request,
             commands::station_commands::submit_station_abandonment,
