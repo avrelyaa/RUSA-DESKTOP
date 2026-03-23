@@ -260,6 +260,27 @@ pub async fn get_station_findings(
 }
 
 #[tauri::command]
+pub async fn get_station_supply_requests(
+    token: String,
+    station_id: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = if let Some(sid_str) = station_id {
+        let sid = Uuid::parse_str(&sid_str).map_err(|_| "Invalid station ID".to_string())?;
+        sqlx::query_as::<_, StationSupplyRequestRow>(
+            "SELECT id, station_id, title, items, total_cost, status, requested_by, reviewed_by, notes, created_at FROM station_supply_requests WHERE station_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+        ).bind(sid).fetch_all(db::get_db()).await
+    } else {
+        sqlx::query_as::<_, StationSupplyRequestRow>(
+            "SELECT id, station_id, title, items, total_cost, status, requested_by, reviewed_by, notes, created_at FROM station_supply_requests WHERE deleted_at IS NULL ORDER BY created_at DESC"
+        ).fetch_all(db::get_db()).await
+    }.map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
 pub async fn submit_station_supply_request(
     token: String,
     station_id: String,
