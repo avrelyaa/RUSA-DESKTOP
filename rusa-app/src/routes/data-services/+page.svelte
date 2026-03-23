@@ -47,6 +47,11 @@
   let rejectReq: any = $state(null);
   let rejectionReason = $state('');
 
+  // Statistician delivery
+  let deliverOpen = $state(false);
+  let deliverReq: any = $state(null);
+  let deliveryNotes = $state('');
+
   const role = $derived($session?.role_name ?? '');
 
   function initTab() {
@@ -152,11 +157,17 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
-  async function deliver(req: any) {
-    const s = $session; if (!s) return;
+  function openDeliver(req: any) {
+    deliverReq = req; deliveryNotes = '';
+    deliverOpen = true;
+  }
+
+  async function doDeliver() {
+    const s = $session; if (!s || !deliverReq) return;
     try {
-      await dataApi.deliver(s.token, req.id);
+      await dataApi.deliver(s.token, deliverReq.id, deliveryNotes || undefined);
       showToast('Delivered to requester', 'success');
+      deliverOpen = false;
       await reload();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -185,6 +196,12 @@
       lines.push('STATISTICIAN REVIEW NOTES');
       lines.push('-------------------------');
       lines.push(req.review_notes);
+    }
+    if (req.delivery_notes) {
+      lines.push('');
+      lines.push('DELIVERY MESSAGE FROM STATISTICIAN');
+      lines.push('----------------------------------');
+      lines.push(req.delivery_notes);
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -388,7 +405,7 @@
             <span class="req-desc response-preview">{req.response_data || '—'}</span>
           </div>
           <div class="req-actions">
-            <button class="btn-primary" onclick={() => deliver(req)}>Deliver to Requester</button>
+            <button class="btn-primary" onclick={() => openDeliver(req)}>Deliver to Requester</button>
           </div>
         </div>
       {/each}
@@ -567,7 +584,7 @@
               <span class="req-meta">{req.data_type || ''} · Delivered: {req.delivered_at ? new Date(req.delivered_at).toLocaleString() : '—'}</span>
               <div class="result-section">
                 <span class="result-label">Response Data</span>
-                <pre class="result-data">{req.response_data || '—'}</pre>
+                <pre class="result-data" role="region" aria-label="Response data" tabindex="0">{req.response_data || '—'}</pre>
               </div>
               {#if req.analyst_notes}
                 <div class="result-section">
@@ -579,6 +596,12 @@
                 <div class="result-section">
                   <span class="result-label">Statistician Review Notes</span>
                   <p class="result-notes">{req.review_notes}</p>
+                </div>
+              {/if}
+              {#if req.delivery_notes}
+                <div class="result-section">
+                  <span class="result-label">Delivery Message</span>
+                  <p class="result-notes">{req.delivery_notes}</p>
                 </div>
               {/if}
             </div>
@@ -658,6 +681,28 @@
   </div>
 </Modal>
 
+<!-- Statistician Deliver Modal -->
+<Modal bind:open={deliverOpen} title="Deliver: {deliverReq?.title}">
+  <div class="form">
+    <p class="req-meta">Status: <strong>{deliverReq?.status}</strong></p>
+    <p class="req-desc">{deliverReq?.description || ''}</p>
+    {#if deliverReq?.response_data}
+      <div class="deliver-preview">
+        <span class="result-label">Response Data Preview</span>
+        <pre class="result-data" role="region" aria-label="Response data preview" tabindex="0">{deliverReq.response_data}</pre>
+      </div>
+    {/if}
+    {#if deliverReq?.analyst_notes}
+      <p class="req-meta">Analyst notes: {deliverReq.analyst_notes}</p>
+    {/if}
+    <Field label="Delivery Message (optional)" type="textarea" bind:value={deliveryNotes} placeholder="Add a summary or message for the requester" />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => deliverOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={doDeliver}>Confirm Delivery</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs-bar { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; padding: 0.6rem 1rem; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 0.4rem; }
@@ -687,6 +732,8 @@
   .result-section { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; }
   .result-label { font-family: 'Space Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .result-data { background: #080d1a; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Space Mono', monospace; font-size: 0.78rem; margin: 0; padding: 0.75rem; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+  .result-data:focus { outline: 1px solid #3d7fff; }
+  .deliver-preview { display: flex; flex-direction: column; gap: 0.25rem; }
   .result-notes { color: #8fa3cc; font-size: 0.82rem; margin: 0; }
   .btn-download { background: none; border: 1px solid #00c864; border-radius: 4px; color: #00c864; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; padding: 0.5rem 1rem; white-space: nowrap; }
   .form { display: flex; flex-direction: column; gap: 1rem; }

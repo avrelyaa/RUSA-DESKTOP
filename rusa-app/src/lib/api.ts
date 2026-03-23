@@ -64,8 +64,8 @@ export const dataApi = {
     invoke<void>('analyst_submit_response', { token, requestId, responseData, analystNotes }),
   analystReject: (token: string, requestId: string, rejectionReason: string) =>
     invoke<void>('analyst_reject_request', { token, requestId, rejectionReason }),
-  deliver: (token: string, requestId: string) =>
-    invoke<void>('deliver_data_response', { token, requestId }),
+  deliver: (token: string, requestId: string, deliveryNotes?: string) =>
+    invoke<void>('deliver_data_response', { token, requestId, deliveryNotes }),
 };
 
 // Security
