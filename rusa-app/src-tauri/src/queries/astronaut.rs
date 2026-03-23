@@ -327,6 +327,16 @@ pub async fn get_conclusion_request_mission_id(
     Ok(row.map(|(id,)| id))
 }
 
+pub async fn get_mission_created_by(mission_id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
+    let row: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT created_by FROM missions WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(mission_id)
+    .fetch_optional(get_db())
+    .await?;
+    Ok(row.and_then(|(id,)| id))
+}
+
 pub async fn update_conclusion_request_review(
     request_id: Uuid,
     decision: &str,

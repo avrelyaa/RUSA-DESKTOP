@@ -332,6 +332,21 @@ pub async fn review_conclusion_request(
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "Conclusion request not found".to_string())?;
 
+    // Continuity check: only the wanderer who created the mission can approve the conclusion request
+    let mission_created_by = astronaut_queries::get_mission_created_by(mission_id)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    match mission_created_by {
+        Some(creator_id) if creator_id != session.user_id => {
+            return Err("Only the user who created this mission can approve the conclusion request".to_string());
+        }
+        None => {
+            return Err("Mission has no recorded creator; approval authority cannot be validated".to_string());
+        }
+        _ => {}
+    }
+
     astronaut_queries::update_conclusion_request_review(
         rid,
         &decision,

@@ -4,7 +4,7 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { astronautApi } from '$lib/api';
+  import { astronautApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
@@ -56,13 +56,30 @@
 
   // Review form (wanderer/taskmaster)
   let reviewOpen = $state(false);
+  let reviewTarget: any = $state(null);
   let reviewRequestId = $state('');
   let reviewDecision = $state('approved');
   let reviewNotes = $state('');
 
+  let allUsers: any[] = $state([]);
+
   const isWanderer = $derived($session?.role_name === 'the_wanderer');
   const isDirector = $derived(
     $session?.role_name === 'the_wanderer' || $session?.role_name === 'the_taskmaster'
+  );
+
+  function getUserName(userId: string | undefined | null): string {
+    if (!userId) return '—';
+    const u = allUsers.find((u: any) => u.id === userId);
+    return u ? (u.full_name ?? u.username ?? userId) : userId;
+  }
+
+  const reviewMission = $derived(
+    reviewTarget ? missions.find((m: any) => m.id === reviewTarget.mission_id) : null
+  );
+
+  const isAuthorizedForConclusionReview = $derived(
+    reviewMission ? reviewMission.created_by === $session?.user_id : false
   );
 
   onMount(async () => {
@@ -77,6 +94,7 @@
         astronautApi.getShips(s.token),
         astronautApi.getConclusionRequests(s.token),
       ]);
+      allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
@@ -153,8 +171,9 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
-  function openReview(requestId: string) {
-    reviewRequestId = requestId;
+  function openReview(row: any) {
+    reviewTarget = row;
+    reviewRequestId = row.id;
     reviewDecision = 'approved';
     reviewNotes = '';
     reviewOpen = true;
@@ -255,7 +274,7 @@
     <Table columns={conclusionCols} rows={conclusionRequests}>
       {#snippet rowActions(row)}
         {#if isDirector && row.status === 'pending'}
-          <button class="btn-action" onclick={() => openReview(row.id)}>Review</button>
+          <button class="btn-action" onclick={() => openReview(row)}>Review</button>
         {/if}
       {/snippet}
     </Table>
@@ -334,11 +353,22 @@
 
 <Modal bind:open={reviewOpen} title="Review Conclusion Request">
   <div class="form">
+    {#if reviewMission}
+      <div class="info-block">
+        <p class="info-text">Mission: <strong>{reviewMission.title}</strong></p>
+        <p class="info-text">Mission Creator: <strong>{getUserName(reviewMission.created_by)}</strong></p>
+        {#if isAuthorizedForConclusionReview}
+          <p class="auth-badge auth-ok">✓ You are authorized to review this conclusion request</p>
+        {:else}
+          <p class="auth-badge auth-denied">✗ Not authorized — only the user who created this mission can review this request</p>
+        {/if}
+      </div>
+    {/if}
     <Field label="Decision" type="select" bind:value={reviewDecision} options={[{value:'approved',label:'Approve'},{value:'rejected',label:'Reject'}]} />
     <Field label="Review Notes" type="textarea" bind:value={reviewNotes} rows={4} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitReview}>Submit Review</button>
+      <button class="btn-primary" onclick={submitReview} disabled={!isAuthorizedForConclusionReview}>Submit Review</button>
     </div>
   </div>
 </Modal>
@@ -353,7 +383,13 @@
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-action { background: none; border: 1px solid #3d7fff; border-radius: 4px; color: #3d7fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.06em; padding: 0.25rem 0.75rem; }
   .btn-action:hover { background: #3d7fff22; }
+  .info-block { background: rgba(61,127,255,0.05); border: 1px solid #1e2d4a; border-radius: 4px; display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem; }
+  .info-text { font-size: 0.85rem; color: #8fa3cc; }
+  .auth-badge { border-radius: 3px; font-size: 0.8rem; font-weight: 700; padding: 0.35rem 0.625rem; }
+  .auth-ok { background: rgba(0,200,83,0.12); color: #00c853; }
+  .auth-denied { background: rgba(255,68,102,0.12); color: #ff4466; }
 </style>

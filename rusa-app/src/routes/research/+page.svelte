@@ -129,6 +129,18 @@
 
   const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
 
+  function getUserName(userId: string | undefined | null): string {
+    if (!userId) return '—';
+    const u = allUsers.find((u: any) => u.id === userId);
+    return u ? (u.full_name ?? u.username ?? userId) : userId;
+  }
+
+  const isAuthorizedForConclusion = $derived(
+    conclusionReviewTarget
+      ? conclusionReviewTarget.reviewed_by === $session?.user_id
+      : false
+  );
+
   const approvedTests = $derived(tests.filter((t: any) => t.status === 'approved'));
 
   function filteredAssignees(search: string): any[] {
@@ -667,6 +679,7 @@
               <th>Experiment Title</th>
               <th>Type</th>
               <th>Requested At</th>
+              <th>Original Approver</th>
               <th>Final Notes (Preview)</th>
               <th>Actions</th>
             </tr>
@@ -677,6 +690,7 @@
                 <td>{exp.title}</td>
                 <td>{exp.experiment_type ?? '—'}</td>
                 <td>{exp.conclusion_requested_at ? new Date(exp.conclusion_requested_at).toLocaleString() : '—'}</td>
+                <td>{getUserName(exp.reviewed_by)}</td>
                 <td class="notes-preview">{exp.final_notes ? exp.final_notes.slice(0, 80) + (exp.final_notes.length > 80 ? '…' : '') : '—'}</td>
                 <td>
                   <button class="btn-small btn-conclude" onclick={() => openConclusionReview(exp)}>Review</button>
@@ -886,6 +900,12 @@
         <p class="info-text">Experiment: <strong>{conclusionReviewTarget.title}</strong></p>
         <p class="info-text">Type: <strong>{conclusionReviewTarget.experiment_type ?? '—'}</strong></p>
         <p class="info-text">Requested: <strong>{conclusionReviewTarget.conclusion_requested_at ? new Date(conclusionReviewTarget.conclusion_requested_at).toLocaleString() : '—'}</strong></p>
+        <p class="info-text">Original Approver: <strong>{getUserName(conclusionReviewTarget.reviewed_by)}</strong></p>
+        {#if isAuthorizedForConclusion}
+          <p class="auth-badge auth-ok">✓ You are authorized to approve this conclusion</p>
+        {:else}
+          <p class="auth-badge auth-denied">✗ Not authorized — only the original proposal approver can approve this conclusion</p>
+        {/if}
       </div>
       <div class="field">
         <span class="field-label">Executive Summary</span>
@@ -948,7 +968,7 @@
       <Field label="Review Notes (optional)" type="textarea" bind:value={conclusionReviewNotes} rows={3} />
       <div class="form-actions">
         <button class="btn-secondary" onclick={() => conclusionReviewOpen = false}>Cancel</button>
-        <button class="btn-danger" onclick={submitConclusionReview} disabled={!conclusionDecision}>
+        <button class="btn-danger" onclick={submitConclusionReview} disabled={!conclusionDecision || !isAuthorizedForConclusion}>
           {conclusionDecision === 'approve' ? 'Approve Conclusion' : conclusionDecision === 'reject' ? 'Reject Conclusion' : 'Submit Decision'}
         </button>
       </div>
@@ -1136,6 +1156,9 @@
   .badge-approved { background: rgba(0,200,83,0.12); color: #00c853; }
   .badge-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
   .badge-conclude { background: rgba(124,58,237,0.15); color: #a78bfa; }
+  .auth-badge { border-radius: 3px; font-size: 0.8rem; font-weight: 700; padding: 0.35rem 0.625rem; }
+  .auth-ok { background: rgba(0,200,83,0.12); color: #00c853; }
+  .auth-denied { background: rgba(255,68,102,0.12); color: #ff4466; }
   .test-checklist { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 150px; overflow-y: auto; padding: 0.375rem; display: flex; flex-direction: column; gap: 0.25rem; }
   .test-check-item { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.25rem 0.375rem; border-radius: 3px; }
   .test-check-item:hover { background: rgba(61,127,255,0.06); }

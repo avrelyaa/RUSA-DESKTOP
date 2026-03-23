@@ -380,18 +380,29 @@ pub async fn approve_experiment_conclusion(
 
     let eid = Uuid::parse_str(&experiment_id).map_err(|_| "Invalid experiment ID".to_string())?;
 
-    let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
-        "SELECT id, status FROM experiments WHERE id = $1 AND deleted_at IS NULL"
+    let row: Option<(Uuid, Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, status, reviewed_by FROM experiments WHERE id = $1 AND deleted_at IS NULL"
     )
     .bind(eid)
     .fetch_optional(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let (_, status) = row.ok_or_else(|| "Experiment not found".to_string())?;
+    let (_, status, reviewed_by) = row.ok_or_else(|| "Experiment not found".to_string())?;
 
     if status.as_deref() != Some("conclusion_requested") {
         return Err("Experiment is not awaiting conclusion approval".to_string());
+    }
+
+    // Continuity check: only the director who approved the initial proposal can approve the conclusion
+    match reviewed_by {
+        Some(approver_id) if approver_id != session.user_id => {
+            return Err("Only the director who approved the initial proposal can approve the conclusion".to_string());
+        }
+        None => {
+            return Err("This experiment has no recorded proposal approver; conclusion cannot be approved".to_string());
+        }
+        _ => {}
     }
 
     match decision.as_str() {
