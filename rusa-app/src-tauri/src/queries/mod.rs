@@ -8,3 +8,4 @@ pub mod budget;
 pub mod sanitary;
 pub mod governance;
 pub mod medical;
+pub mod general;
