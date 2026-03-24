@@ -103,7 +103,6 @@
   let assignExpTaskOpen = $state(false);
   let assignExpTaskExp: any = $state(null);
   let assignExpTaskAssignee: any = $state(null);
-  let assignExpTaskAssigneeSearch = $state('');
   let assignExpTaskTitle = $state('');
   let assignExpTaskDue = $state('');
 
@@ -141,15 +140,6 @@
   );
 
   const approvedTests = $derived(tests.filter((t: any) => t.status === 'approved'));
-
-  function filteredAssignees(search: string): any[] {
-    const q = search.toLowerCase();
-    return allUsers.filter(u =>
-      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
-    ).slice(0, 8);
-  }
-
-  let assignExpTaskSuggestions = $derived(assignExpTaskAssigneeSearch.length > 0 ? filteredAssignees(assignExpTaskAssigneeSearch) : []);
 
   onMount(async () => {
     const s = $session;
@@ -407,7 +397,6 @@
   function openAssignExpTask(exp: any) {
     assignExpTaskExp = exp;
     assignExpTaskAssignee = null;
-    assignExpTaskAssigneeSearch = '';
     assignExpTaskTitle = '';
     assignExpTaskDue = '';
     assignExpTaskOpen = true;
@@ -1051,22 +1040,7 @@
     </div>
     <div class="field">
       <label class="field-label">Assign To</label>
-      <div class="assignee-autocomplete">
-        {#if assignExpTaskAssignee}
-          <span class="token">{assignExpTaskAssignee.full_name || assignExpTaskAssignee.username}<button class="token-remove" onclick={() => { assignExpTaskAssignee = null; assignExpTaskAssigneeSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={assignExpTaskAssigneeSearch} placeholder="Search by name or username…" />
-            {#if assignExpTaskSuggestions.length > 0}
-              <div class="suggestions">
-                {#each assignExpTaskSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { assignExpTaskAssignee = u; assignExpTaskAssigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={assignExpTaskAssignee} />
     </div>
     <Field label="Task Title" bind:value={assignExpTaskTitle} required />
     <Field label="Due Date" type="datetime-local" bind:value={assignExpTaskDue} />
@@ -1109,16 +1083,6 @@
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-size: 0.85rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
-  .assignee-autocomplete { position: relative; }
-  .autocomplete-wrap { position: relative; }
-  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
-  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
-  .suggestion-item:last-child { border-bottom: none; }
-  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
-  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
-  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
-  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
-  .token-remove:hover { color: #ff4466; }
   .btn-conclude { border-color: #7c3aed; color: #a78bfa; }
   .btn-conclude:hover { border-color: #a78bfa; color: #c4b5fd; }
   .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
