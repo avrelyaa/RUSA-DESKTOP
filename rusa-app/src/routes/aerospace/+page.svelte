@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { aerospaceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -31,13 +32,11 @@
 
   // Assign task form (manager/director)
   let assignOpen = $state(false);
-  let aAssignee = $state('');
   let aTitle = $state('');
   let aDesc = $state('');
   let aDue = $state('');
 
   let allUsers: any[] = $state([]);
-  let assigneeSearch = $state('');
   let assigneeSelected: any = $state(null);
 
   // Update assigned task status
@@ -54,15 +53,6 @@
   let rRecommendations = $state('');
 
   const canAssignTasks = $derived(($session?.tier ?? 0) >= 2);
-
-  function filteredAssignees(search: string): any[] {
-    const q = search.toLowerCase();
-    return allUsers.filter(u =>
-      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
-    ).slice(0, 8);
-  }
-
-  let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -112,7 +102,7 @@
     try {
       await aerospaceApi.assignTask(s.token, assigneeSelected.id, aTitle, aDesc || undefined, aDue || undefined);
       showToast('Task assigned', 'success');
-      assignOpen = false; assigneeSelected = null; assigneeSearch = ''; aTitle = ''; aDesc = ''; aDue = '';
+      assignOpen = false; assigneeSelected = null; aTitle = ''; aDesc = ''; aDue = '';
       assignedTasks = await aerospaceApi.getAssignedTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -332,28 +322,13 @@
   <div class="form">
     <div class="field">
       <label class="field-label">Assign To</label>
-      <div class="assignee-autocomplete">
-        {#if assigneeSelected}
-          <span class="token">{assigneeSelected.full_name || assigneeSelected.username}<button class="token-remove" onclick={() => { assigneeSelected = null; assigneeSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={assigneeSearch} placeholder="Search by name or username…" />
-            {#if assigneeSuggestions.length > 0}
-              <div class="suggestions">
-                {#each assigneeSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { assigneeSelected = u; assigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
     </div>
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={aDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { assignOpen = false; assigneeSelected = null; assigneeSearch = ''; }}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { assignOpen = false; assigneeSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={assignTask}>Assign</button>
     </div>
   </div>
@@ -419,15 +394,5 @@
   .badge-cancelled { background: rgba(255,68,102,0.12); color: #ff4466; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
-  .assignee-autocomplete { position: relative; }
-  .autocomplete-wrap { position: relative; }
-  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
-  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
-  .suggestion-item:last-child { border-bottom: none; }
-  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
-  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
-  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
-  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
-  .token-remove:hover { color: #ff4466; }
   .report-label { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
 </style>

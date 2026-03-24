@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { settlementApi, governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -22,13 +23,11 @@
 
   // Task form
   let taskOpen = $state(false);
-  let tAssignee = $state('');
   let tTitle = $state('');
   let tDesc = $state('');
   let tDue = $state('');
 
   let allUsers: any[] = $state([]);
-  let assigneeSearch = $state('');
   let assigneeSelected: any = $state(null);
 
   // Update nomad task status
@@ -57,7 +56,6 @@
 
   // Troublesome settler report form
   let troublesomeOpen = $state(false);
-  let trSettlerSearch = $state('');
   let trSettlerSelected: any = $state(null);
   let trDesc = $state('');
 
@@ -72,16 +70,6 @@
 
   const isCommander = $derived($session?.role_name === 'settler_commander');
   const isCivilEngineer = $derived($session?.role_name === 'civil_engineer');
-
-  function filteredAssignees(search: string): any[] {
-    const q = search.toLowerCase();
-    return allUsers.filter(u =>
-      u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q)
-    ).slice(0, 8);
-  }
-
-  let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
-  let trSettlerSuggestions = $derived(trSettlerSearch.length > 0 ? filteredAssignees(trSettlerSearch) : []);
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -107,7 +95,7 @@
     try {
       await settlementApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDue || undefined);
       showToast('Task assigned', 'success');
-      taskOpen = false; assigneeSelected = null; assigneeSearch = ''; tTitle = ''; tDesc = ''; tDue = '';
+      taskOpen = false; assigneeSelected = null; tTitle = ''; tDesc = ''; tDue = '';
       tasks = await settlementApi.getTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -165,7 +153,7 @@
     try {
       await settlementApi.submitTroublesomeReport(s.token, trSettlerSelected.id, trDesc);
       showToast('Troublesome settler report submitted', 'success');
-      troublesomeOpen = false; trSettlerSelected = null; trSettlerSearch = ''; trDesc = '';
+      troublesomeOpen = false; trSettlerSelected = null; trDesc = '';
       troublesomeReports = await settlementApi.getTroublesomeReports(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -319,28 +307,13 @@
   <div class="form">
     <div class="field">
       <label class="field-label">Assign To</label>
-      <div class="assignee-autocomplete">
-        {#if assigneeSelected}
-          <span class="token">{assigneeSelected.full_name || assigneeSelected.username}<button class="token-remove" onclick={() => { assigneeSelected = null; assigneeSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={assigneeSearch} placeholder="Search by name or username…" />
-            {#if assigneeSuggestions.length > 0}
-              <div class="suggestions">
-                {#each assigneeSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { assigneeSelected = u; assigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
     </div>
     <Field label="Title" bind:value={tTitle} required />
     <Field label="Description" type="textarea" bind:value={tDesc} />
     <Field label="Due Date" type="date" bind:value={tDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { taskOpen = false; assigneeSelected = null; assigneeSearch = ''; }}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { taskOpen = false; assigneeSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={assignTask}>Assign</button>
     </div>
   </div>
@@ -399,26 +372,11 @@
     <p class="info-text">Report a settler who is causing trouble to the Settler Commander. The Commander may place them on house arrest and request deportation.</p>
     <div class="field">
       <label class="field-label">Settler to Report</label>
-      <div class="assignee-autocomplete">
-        {#if trSettlerSelected}
-          <span class="token">{trSettlerSelected.full_name || trSettlerSelected.username}<button class="token-remove" onclick={() => { trSettlerSelected = null; trSettlerSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={trSettlerSearch} placeholder="Search by name or username…" />
-            {#if trSettlerSuggestions.length > 0}
-              <div class="suggestions">
-                {#each trSettlerSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { trSettlerSelected = u; trSettlerSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={trSettlerSelected} placeholder="Search settler by name or username…" />
     </div>
     <Field label="Description" type="textarea" bind:value={trDesc} required />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { troublesomeOpen = false; trSettlerSelected = null; trSettlerSearch = ''; trDesc = ''; }}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { troublesomeOpen = false; trSettlerSelected = null; trDesc = ''; }}>Cancel</button>
       <button class="btn-primary" onclick={submitTroublesomeReport}>Submit Report</button>
     </div>
   </div>
@@ -472,14 +430,4 @@
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
   .field-input:focus { border-color: #3d7fff; outline: none; }
-  .assignee-autocomplete { position: relative; }
-  .autocomplete-wrap { position: relative; }
-  .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
-  .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
-  .suggestion-item:last-child { border-bottom: none; }
-  .suggestion-item:hover { background: rgba(61,127,255,0.1); }
-  .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
-  .token { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(61,127,255,0.15); border: 1px solid rgba(61,127,255,0.3); border-radius: 12px; color: #8fa3cc; font-size: 0.8rem; padding: 2px 8px; }
-  .token-remove { background: none; border: none; color: #8fa3cc; cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 2px; }
-  .token-remove:hover { color: #ff4466; }
 </style>
