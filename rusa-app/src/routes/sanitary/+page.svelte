@@ -170,7 +170,7 @@
     const s = $session; if (!s) return;
     if (!inspLocation || !inspDate || !inspFindings) { showToast('Location, date, and findings required', 'error'); return; }
     try {
-      await sanitaryApi.createInspection(s.token, inspLocation, inspDate, inspFindings, inspViolations || undefined, inspRecommendations || undefined);
+      await sanitaryApi.createInspection(s.token, inspLocation, inspDate + 'T00:00:00Z', inspFindings, inspViolations || undefined, inspRecommendations || undefined);
       showToast('Inspection report created', 'success');
       inspOpen = false; inspLocation = ''; inspDate = ''; inspFindings = ''; inspViolations = ''; inspRecommendations = '';
       inspections = await sanitaryApi.getInspections(s.token);
