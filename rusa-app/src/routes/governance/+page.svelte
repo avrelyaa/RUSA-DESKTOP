@@ -55,6 +55,13 @@
   let mDesc = $state('');
   let mScheduled = $state('');
   let mLocation = $state('');
+  // Meeting To/CC/BCC recipient state
+  let mToSelected: any[] = $state([]);
+  let mCcSelected: any[] = $state([]);
+  let mBccSelected: any[] = $state([]);
+  let mToSearch = $state('');
+  let mCcSearch = $state('');
+  let mBccSearch = $state('');
 
   // Relocation form
   let relocOpen = $state(false);
@@ -184,11 +191,17 @@
 
   async function createMeeting() {
     const s = $session; if (!s) return;
-    if (!mTitle) { showToast('Title required', 'error'); return; }
+    if (!mTitle) { showToast('Subject required', 'error'); return; }
+    if (mToSelected.length === 0) { showToast('At least one To recipient is required', 'error'); return; }
     try {
-      await governanceApi.createMeeting(s.token, mTitle, mDesc || undefined, mScheduled || undefined, mLocation || undefined);
+      const toIds = mToSelected.map((u: any) => u.id);
+      const ccIds = mCcSelected.map((u: any) => u.id);
+      const bccIds = mBccSelected.map((u: any) => u.id);
+      await governanceApi.createMeeting(s.token, mTitle, mDesc || undefined, mScheduled || undefined, mLocation || undefined, [], toIds, ccIds, bccIds);
       showToast('Meeting created', 'success');
       meetingOpen = false; mTitle = ''; mDesc = ''; mScheduled = ''; mLocation = '';
+      mToSelected = []; mCcSelected = []; mBccSelected = [];
+      mToSearch = ''; mCcSearch = ''; mBccSearch = '';
       meetings = await governanceApi.getMeetings(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -351,6 +364,19 @@
   }
 
   let ntSuggestions = $derived(ntSearch.length > 0 ? filteredNomadTargets(ntSearch) : []);
+
+  function filteredMeetingRecipients(search: string, exclude: any[]): any[] {
+    const q = search.toLowerCase();
+    const excludeIds = new Set(exclude.map((u: any) => u.id));
+    return allUsers.filter((u: any) =>
+      !excludeIds.has(u.id) &&
+      (u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q))
+    ).slice(0, 8);
+  }
+
+  let mToSuggestions = $derived(mToSearch.length > 0 ? filteredMeetingRecipients(mToSearch, mToSelected) : []);
+  let mCcSuggestions = $derived(mCcSearch.length > 0 ? filteredMeetingRecipients(mCcSearch, [...mToSelected, ...mCcSelected]) : []);
+  let mBccSuggestions = $derived(mBccSearch.length > 0 ? filteredMeetingRecipients(mBccSearch, [...mToSelected, ...mCcSelected, ...mBccSelected]) : []);
 
   let staffOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
   let roleOptions = $derived(allRoles.map((r: any) => ({ value: r.name, label: r.display_name || r.name })));
@@ -527,12 +553,76 @@
 
 <Modal bind:open={meetingOpen} title="Create Meeting">
   <div class="form">
-    <Field label="Title" bind:value={mTitle} required />
+    <div class="field">
+      <label class="field-label">From</label>
+      <div class="field-input from-field">{$session?.full_name || $session?.username || '—'}</div>
+    </div>
+    <div class="field">
+      <label class="field-label">To <span class="required-star">*</span></label>
+      <div class="assignee-autocomplete">
+        <div class="token-list">
+          {#each mToSelected as u}
+            <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => { mToSelected = mToSelected.filter((x: any) => x.id !== u.id); }}>×</button></span>
+          {/each}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={mToSearch} placeholder="Search by name or username…" />
+            {#if mToSuggestions.length > 0}
+              <div class="suggestions">
+                {#each mToSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { mToSelected = [...mToSelected, u]; mToSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">CC</label>
+      <div class="assignee-autocomplete">
+        <div class="token-list">
+          {#each mCcSelected as u}
+            <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => { mCcSelected = mCcSelected.filter((x: any) => x.id !== u.id); }}>×</button></span>
+          {/each}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={mCcSearch} placeholder="Search by name or username…" />
+            {#if mCcSuggestions.length > 0}
+              <div class="suggestions">
+                {#each mCcSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { mCcSelected = [...mCcSelected, u]; mCcSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">BCC</label>
+      <div class="assignee-autocomplete">
+        <div class="token-list">
+          {#each mBccSelected as u}
+            <span class="token">{u.full_name || u.username}<button class="token-remove" onclick={() => { mBccSelected = mBccSelected.filter((x: any) => x.id !== u.id); }}>×</button></span>
+          {/each}
+          <div class="autocomplete-wrap">
+            <input class="field-input" bind:value={mBccSearch} placeholder="Search by name or username…" />
+            {#if mBccSuggestions.length > 0}
+              <div class="suggestions">
+                {#each mBccSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { mBccSelected = [...mBccSelected, u]; mBccSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+    <Field label="Subject" bind:value={mTitle} required />
     <Field label="Description" type="textarea" bind:value={mDesc} />
     <Field label="Scheduled At" type="datetime-local" bind:value={mScheduled} />
     <Field label="Location" bind:value={mLocation} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => meetingOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { meetingOpen = false; mToSelected = []; mCcSelected = []; mBccSelected = []; mToSearch = ''; mCcSearch = ''; mBccSearch = ''; }}>Cancel</button>
       <button class="btn-primary" onclick={createMeeting}>Create</button>
     </div>
   </div>
@@ -684,6 +774,11 @@
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .assignee-autocomplete { position: relative; }
   .autocomplete-wrap { position: relative; }
+  .token-list { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: flex-start; border: 1px solid #1e2d4a; border-radius: 4px; padding: 0.4rem 0.5rem; background: rgba(13,21,40,0.6); }
+  .token-list .autocomplete-wrap { flex: 1; min-width: 120px; }
+  .token-list .autocomplete-wrap .field-input { border: none; background: transparent; padding: 2px 0; box-shadow: none; }
+  .from-field { background: rgba(13,21,40,0.4); color: #8fa3cc; cursor: default; pointer-events: none; }
+  .required-star { color: #ff6444; }
   .suggestions { position: absolute; top: 100%; left: 0; right: 0; background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; z-index: 100; max-height: 200px; overflow-y: auto; }
   .suggestion-item { display: block; width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; color: #e8eeff; cursor: pointer; font-size: 0.85rem; padding: 0.5rem 0.75rem; text-align: left; }
   .suggestion-item:last-child { border-bottom: none; }
