@@ -52,7 +52,7 @@
     const s = $session; if (!s) return;
     if (!aTitle) { showToast('Title required', 'error'); return; }
     try {
-      await researchTaskApi.assign(s.token, aTitle, aDesc || undefined, assigneeSelected?.id || undefined, aSourceMsg || undefined, aDueDate || undefined);
+      await researchTaskApi.assign(s.token, aTitle, aDesc || undefined, assigneeSelected?.id || undefined, aSourceMsg || undefined, aDueDate ? aDueDate + 'T00:00:00Z' : undefined);
       showToast('Task assigned', 'success');
       assignOpen = false; aTitle = ''; aDesc = ''; assigneeSelected = null; aSourceMsg = ''; aDueDate = '';
       tasks = await researchTaskApi.getTasks(s.token);

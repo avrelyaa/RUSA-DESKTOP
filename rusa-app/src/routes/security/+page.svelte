@@ -127,7 +127,7 @@
     const s = $session; if (!s) return;
     if (!incTitle || !incDesc) { showToast('Title and description required', 'error'); return; }
     try {
-      await securityApi.createIncident(s.token, incTitle, incDesc, incLocation || undefined, incDate || undefined, incSeverity || undefined);
+      await securityApi.createIncident(s.token, incTitle, incDesc, incLocation || undefined, incDate ? incDate + 'T00:00:00Z' : undefined, incSeverity || undefined);
       showToast('Incident reported', 'success');
       incidentOpen = false; incTitle = ''; incDesc = ''; incLocation = ''; incDate = ''; incSeverity = '';
       incidents = await securityApi.getIncidents(s.token);

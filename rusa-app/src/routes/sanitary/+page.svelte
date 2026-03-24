@@ -94,7 +94,7 @@
     const s = $session; if (!s) return;
     if (!assigneeSelected || !tTitle) { showToast('Assignee and title required', 'error'); return; }
     try {
-      await sanitaryApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDivision || undefined, tDue || undefined);
+      await sanitaryApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDivision || undefined, tDue ? tDue + 'T00:00:00Z' : undefined);
       showToast('Task assigned', 'success');
       taskOpen = false; assigneeSelected = null; tTitle = ''; tDesc = ''; tDivision = ''; tDue = '';
       tasks = await sanitaryApi.getTasks(s.token);

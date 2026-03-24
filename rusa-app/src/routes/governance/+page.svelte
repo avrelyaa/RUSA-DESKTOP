@@ -209,7 +209,7 @@
     const s = $session; if (!s) return;
     if (!rStaff || !rLocation || !rType) { showToast('Staff, location, and type required', 'error'); return; }
     try {
-      await governanceApi.relocateStaff(s.token, rStaff, rLocation, rType, rStart || undefined, rEnd || undefined, rReason || undefined);
+      await governanceApi.relocateStaff(s.token, rStaff, rLocation, rType, rStart ? rStart + 'T00:00:00Z' : undefined, rEnd ? rEnd + 'T00:00:00Z' : undefined, rReason || undefined);
       showToast('Relocation submitted', 'success');
       relocOpen = false; rStaff = ''; rLocation = ''; rType = ''; rStart = ''; rEnd = ''; rReason = '';
       relocations = await governanceApi.getRelocations(s.token);
@@ -220,7 +220,7 @@
     const s = $session; if (!s) return;
     if (!eTitle) { showToast('Title required', 'error'); return; }
     try {
-      await governanceApi.logEvent(s.token, eTitle, eDesc || undefined, eDate || undefined, eVenue || undefined);
+      await governanceApi.logEvent(s.token, eTitle, eDesc || undefined, eDate ? eDate + 'T00:00:00Z' : undefined, eVenue || undefined);
       showToast('Event logged', 'success');
       eventOpen = false; eTitle = ''; eDesc = ''; eDate = ''; eVenue = '';
       events = await governanceApi.getEvents(s.token);

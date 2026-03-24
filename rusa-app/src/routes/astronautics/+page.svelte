@@ -103,7 +103,7 @@
     const s = $session; if (!s) return;
     if (!mTitle) { showToast('Title required', 'error'); return; }
     try {
-      await astronautApi.createMission(s.token, mTitle, mDesc || undefined, mType || undefined, mShip || undefined, mSector || undefined, undefined, mStart || undefined);
+      await astronautApi.createMission(s.token, mTitle, mDesc || undefined, mType || undefined, mShip || undefined, mSector || undefined, undefined, mStart ? mStart + 'T00:00:00Z' : undefined);
       showToast('Mission created', 'success');
       missionOpen = false; mTitle = ''; mDesc = ''; mType = ''; mShip = ''; mSector = ''; mStart = '';
       missions = await astronautApi.getMissions(s.token);

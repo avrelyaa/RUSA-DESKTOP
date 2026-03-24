@@ -321,10 +321,13 @@ pub async fn submit_budget_request(
         return Err("Only head of medicine or sanitary can submit budget requests".to_string());
     }
 
+    let amount_dec = rust_decimal::Decimal::try_from(amount)
+        .map_err(|e| format!("Invalid amount value '{}': {}", amount, e))?;
+
     let id = budget_queries::insert_budget_request(
         &title,
         &description,
-        amount,
+        amount_dec,
         items.as_deref(),
         session.user_id,
     )
@@ -346,10 +349,13 @@ pub async fn submit_expenditure_report(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
 
+    let total_amount_dec = rust_decimal::Decimal::try_from(total_amount)
+        .map_err(|e| format!("Invalid total_amount value '{}': {}", total_amount, e))?;
+
     let id = budget_queries::insert_expenditure_report(
         &title,
         &description,
-        total_amount,
+        total_amount_dec,
         items.as_deref(),
         invoice_data.as_deref(),
         session.user_id,

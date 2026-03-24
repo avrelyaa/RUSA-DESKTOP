@@ -93,7 +93,7 @@
     const s = $session; if (!s) return;
     if (!assigneeSelected || !tTitle) { showToast('Assignee and title required', 'error'); return; }
     try {
-      await settlementApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDue || undefined);
+      await settlementApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDue ? tDue + 'T00:00:00Z' : undefined);
       showToast('Task assigned', 'success');
       taskOpen = false; assigneeSelected = null; tTitle = ''; tDesc = ''; tDue = '';
       tasks = await settlementApi.getTasks(s.token);
