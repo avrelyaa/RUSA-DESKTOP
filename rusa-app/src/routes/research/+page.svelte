@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { researchApi, researchTaskApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -47,13 +48,11 @@
 
   // Assign research task form
   let assignTaskOpen = $state(false);
-  let rtAssignee = $state('');
   let rtTitle = $state('');
   let rtDesc = $state('');
   let rtDue = $state('');
 
   let allUsers: any[] = $state([]);
-  let assigneeSearch = $state('');
   let assigneeSelected: any = $state(null);
 
   // Submit result form
@@ -150,7 +149,6 @@
     ).slice(0, 8);
   }
 
-  let assigneeSuggestions = $derived(assigneeSearch.length > 0 ? filteredAssignees(assigneeSearch) : []);
   let assignExpTaskSuggestions = $derived(assignExpTaskAssigneeSearch.length > 0 ? filteredAssignees(assignExpTaskAssigneeSearch) : []);
 
   onMount(async () => {
@@ -227,7 +225,7 @@
     try {
       await researchTaskApi.assign(s.token, rtTitle, rtDesc || undefined, assigneeSelected.id, undefined, rtDue || undefined);
       showToast('Research task assigned', 'success');
-      assignTaskOpen = false; assigneeSelected = null; assigneeSearch = ''; rtTitle = ''; rtDesc = ''; rtDue = '';
+      assignTaskOpen = false; assigneeSelected = null; rtTitle = ''; rtDesc = ''; rtDue = '';
       researchTasks = await researchTaskApi.getTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -836,28 +834,13 @@
   <div class="form">
     <div class="field">
       <label class="field-label">Assign To</label>
-      <div class="assignee-autocomplete">
-        {#if assigneeSelected}
-          <span class="token">{assigneeSelected.full_name || assigneeSelected.username}<button class="token-remove" onclick={() => { assigneeSelected = null; assigneeSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={assigneeSearch} placeholder="Search by name or username…" />
-            {#if assigneeSuggestions.length > 0}
-              <div class="suggestions">
-                {#each assigneeSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { assigneeSelected = u; assigneeSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
     </div>
     <Field label="Title" bind:value={rtTitle} required />
     <Field label="Description" type="textarea" bind:value={rtDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={rtDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { assignTaskOpen = false; assigneeSelected = null; assigneeSearch = ''; }}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { assignTaskOpen = false; assigneeSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={assignResearchTask}>Assign</button>
     </div>
   </div>

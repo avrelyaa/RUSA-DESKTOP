@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { governanceApi, userApi, generalApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -81,11 +82,9 @@
 
   // Nomad task form
   let nomadTaskOpen = $state(false);
-  let ntAssignee = $state('');
   let ntTitle = $state('');
   let ntDesc = $state('');
   let ntDue = $state('');
-  let ntSearch = $state('');
   let ntSelected: any = $state(null);
 
   // Librarian form
@@ -234,7 +233,7 @@
     try {
       await governanceApi.nomadAssignTask(s.token, ntSelected.id, ntTitle, ntDesc || undefined, ntDue || undefined);
       showToast('Task assigned', 'success');
-      nomadTaskOpen = false; ntSelected = null; ntSearch = ''; ntTitle = ''; ntDesc = ''; ntDue = '';
+      nomadTaskOpen = false; ntSelected = null; ntTitle = ''; ntDesc = ''; ntDue = '';
       nomadTasks = await governanceApi.getNomadTasks(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -354,16 +353,6 @@
       .filter((u: any) => u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary')
       .map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` }))
   );
-
-  function filteredNomadTargets(search: string): any[] {
-    const q = search.toLowerCase();
-    return allUsers.filter((u: any) =>
-      (u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary') &&
-      (u.username?.toLowerCase().includes(q) || u.full_name?.toLowerCase().includes(q))
-    ).slice(0, 8);
-  }
-
-  let ntSuggestions = $derived(ntSearch.length > 0 ? filteredNomadTargets(ntSearch) : []);
 
   function filteredMeetingRecipients(search: string, exclude: any[]): any[] {
     const q = search.toLowerCase();
@@ -660,28 +649,13 @@
   <div class="form">
     <div class="field">
       <label class="field-label">Assign To (Settler Commander or Head of Sanitary)</label>
-      <div class="assignee-autocomplete">
-        {#if ntSelected}
-          <span class="token">{ntSelected.full_name || ntSelected.username}<button class="token-remove" onclick={() => { ntSelected = null; ntSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input class="field-input" bind:value={ntSearch} placeholder="Search by name or username…" />
-            {#if ntSuggestions.length > 0}
-              <div class="suggestions">
-                {#each ntSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { ntSelected = u; ntSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers.filter((u: any) => u.role_name === 'settler_commander' || u.role_name === 'head_of_sanitary')} bind:selected={ntSelected} />
     </div>
     <Field label="Task Title" bind:value={ntTitle} required />
     <Field label="Description" type="textarea" bind:value={ntDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={ntDue} />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => { nomadTaskOpen = false; ntSelected = null; ntSearch = ''; }}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { nomadTaskOpen = false; ntSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={nomadAssignTask}>Assign</button>
     </div>
   </div>
