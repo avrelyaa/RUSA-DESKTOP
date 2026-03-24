@@ -28,7 +28,7 @@ pub struct SanitaryInventoryRow {
 pub struct DisposalLogRow {
     pub id: Uuid,
     pub item_name: String,
-    pub quantity: Option<f64>,
+    pub quantity: Option<rust_decimal::Decimal>,
     pub unit: Option<String>,
     pub disposal_method: Option<String>,
     pub hazard_level: Option<String>,
@@ -40,10 +40,10 @@ pub struct DisposalLogRow {
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct WastewaterLogRow {
     pub id: Uuid,
-    pub volume_treated: Option<f64>,
+    pub volume_treated: Option<rust_decimal::Decimal>,
     pub unit: Option<String>,
     pub treatment_method: Option<String>,
-    pub ph_level: Option<f64>,
+    pub ph_level: Option<rust_decimal::Decimal>,
     pub quality_notes: Option<String>,
     pub logged_by: Option<Uuid>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -162,7 +162,7 @@ pub async fn insert_sanitary_inventory(
 
 pub async fn insert_disposal_log(
     item_name: &str,
-    quantity: f64,
+    quantity: rust_decimal::Decimal,
     unit: Option<&str>,
     disposal_method: Option<&str>,
     hazard_level: Option<&str>,
@@ -193,10 +193,10 @@ pub async fn get_all_disposal_logs() -> Result<Vec<DisposalLogRow>, sqlx::Error>
 }
 
 pub async fn insert_wastewater_log(
-    volume_treated: f64,
+    volume_treated: rust_decimal::Decimal,
     unit: Option<&str>,
     treatment_method: Option<&str>,
-    ph_level: Option<f64>,
+    ph_level: Option<rust_decimal::Decimal>,
     quality_notes: Option<&str>,
     logged_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {

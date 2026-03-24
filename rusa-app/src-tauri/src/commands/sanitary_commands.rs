@@ -114,9 +114,12 @@ pub async fn add_disposal_log(
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "disposal_crew")?;
 
+    let quantity_dec = rust_decimal::Decimal::try_from(quantity)
+        .map_err(|e| format!("Invalid quantity value '{}': {}", quantity, e))?;
+
     let id = sanitary_queries::insert_disposal_log(
         &item_name,
-        quantity,
+        quantity_dec,
         unit.as_deref(),
         disposal_method.as_deref(),
         hazard_level.as_deref(),
@@ -153,11 +156,17 @@ pub async fn add_wastewater_log(
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "wastewater_crew")?;
 
+    let volume_dec = rust_decimal::Decimal::try_from(volume_treated)
+        .map_err(|e| format!("Invalid volume_treated value '{}': {}", volume_treated, e))?;
+    let ph_dec = ph_level
+        .map(|v| rust_decimal::Decimal::try_from(v).map_err(|e| format!("Invalid ph_level value '{}': {}", v, e)))
+        .transpose()?;
+
     let id = sanitary_queries::insert_wastewater_log(
-        volume_treated,
+        volume_dec,
         unit.as_deref(),
         treatment_method.as_deref(),
-        ph_level,
+        ph_dec,
         quality_notes.as_deref(),
         session.user_id,
     )

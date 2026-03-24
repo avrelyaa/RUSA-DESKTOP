@@ -94,7 +94,7 @@
     const s = $session; if (!s) return;
     if (!assigneeSelected || !tTitle) { showToast('Assignee and title required', 'error'); return; }
     try {
-      await sanitaryApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDivision || undefined, tDue || undefined);
+      await sanitaryApi.assignTask(s.token, assigneeSelected.id, tTitle, tDesc || undefined, tDivision || undefined, tDue ? tDue + 'T00:00:00Z' : undefined);
       showToast('Task assigned', 'success');
       taskOpen = false; assigneeSelected = null; tTitle = ''; tDesc = ''; tDivision = ''; tDue = '';
       tasks = await sanitaryApi.getTasks(s.token);
@@ -170,7 +170,7 @@
     const s = $session; if (!s) return;
     if (!inspLocation || !inspDate || !inspFindings) { showToast('Location, date, and findings required', 'error'); return; }
     try {
-      await sanitaryApi.createInspection(s.token, inspLocation, inspDate, inspFindings, inspViolations || undefined, inspRecommendations || undefined);
+      await sanitaryApi.createInspection(s.token, inspLocation, inspDate + 'T00:00:00Z', inspFindings, inspViolations || undefined, inspRecommendations || undefined);
       showToast('Inspection report created', 'success');
       inspOpen = false; inspLocation = ''; inspDate = ''; inspFindings = ''; inspViolations = ''; inspRecommendations = '';
       inspections = await sanitaryApi.getInspections(s.token);

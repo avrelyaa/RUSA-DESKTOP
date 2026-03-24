@@ -6,7 +6,7 @@ pub struct BudgetRequestRow {
     pub id: Uuid,
     pub title: String,
     pub description: Option<String>,
-    pub amount: Option<f64>,
+    pub amount: Option<rust_decimal::Decimal>,
     pub items: Option<String>,
     pub status: Option<String>,
     pub requested_by: Option<Uuid>,
@@ -20,7 +20,7 @@ pub struct ExpenditureReportRow {
     pub id: Uuid,
     pub title: String,
     pub description: Option<String>,
-    pub total_amount: Option<f64>,
+    pub total_amount: Option<rust_decimal::Decimal>,
     pub items: Option<String>,
     pub invoice_data: Option<String>,
     pub status: Option<String>,
@@ -43,7 +43,7 @@ pub struct InvestigationRow {
 pub async fn insert_budget_request(
     title: &str,
     description: &str,
-    amount: f64,
+    amount: rust_decimal::Decimal,
     items: Option<&str>,
     requested_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
@@ -63,7 +63,7 @@ pub async fn insert_budget_request(
 pub async fn insert_expenditure_report(
     title: &str,
     description: &str,
-    total_amount: f64,
+    total_amount: rust_decimal::Decimal,
     items: Option<&str>,
     invoice_data: Option<&str>,
     reported_by: Uuid,

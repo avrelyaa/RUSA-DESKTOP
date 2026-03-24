@@ -161,7 +161,7 @@
     const s = $session; if (!s) return;
     if (!expTitle || !expDesc || !expType) { showToast('Title, description, and type required', 'error'); return; }
     try {
-      await researchApi.proposeExperiment(s.token, expTitle, expDesc, expType, expStart || undefined, expEnd || undefined);
+      await researchApi.proposeExperiment(s.token, expTitle, expDesc, expType, expStart ? expStart + 'T00:00:00Z' : undefined, expEnd ? expEnd + 'T00:00:00Z' : undefined);
       showToast('Experiment proposed', 'success');
       expOpen = false; expTitle = ''; expDesc = ''; expType = ''; expStart = ''; expEnd = '';
       experiments = await researchApi.getExperiments(s.token);

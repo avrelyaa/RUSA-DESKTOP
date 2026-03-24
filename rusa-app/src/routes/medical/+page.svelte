@@ -123,7 +123,7 @@
     const s = $session; if (!s) return;
     if (!invItem) { showToast('Item name required', 'error'); return; }
     try {
-      await medicalApi.updateInventory(s.token, invItem, invCategory || undefined, invQty || undefined, invUnit || undefined, invExpiry || undefined);
+      await medicalApi.updateInventory(s.token, invItem, invCategory || undefined, invQty || undefined, invUnit || undefined, invExpiry ? invExpiry + 'T00:00:00Z' : undefined);
       showToast('Inventory updated', 'success');
       invOpen = false; invItem = ''; invCategory = ''; invQty = 0; invUnit = ''; invExpiry = '';
       inventory = await medicalApi.getInventory(s.token);

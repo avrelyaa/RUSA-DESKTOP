@@ -30,8 +30,8 @@ struct MapAnnotationRow {
     station_id: Option<Uuid>,
     section_name: String,
     description: Option<String>,
-    x_position: Option<f64>,
-    y_position: Option<f64>,
+    x_position: Option<rust_decimal::Decimal>,
+    y_position: Option<rust_decimal::Decimal>,
     annotated_by: Option<Uuid>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -64,7 +64,7 @@ struct StationSupplyRequestRow {
     station_id: Option<Uuid>,
     title: String,
     items: Option<String>,
-    total_cost: Option<f64>,
+    total_cost: Option<rust_decimal::Decimal>,
     status: Option<String>,
     requested_by: Option<Uuid>,
     reviewed_by: Option<Uuid>,
@@ -141,10 +141,17 @@ pub async fn add_map_annotation(
     let session = validate_session_command(&token).await?;
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
+    let x_dec = x_position
+        .map(|v| rust_decimal::Decimal::try_from(v).map_err(|e| format!("Invalid x_position value '{}': {}", v, e)))
+        .transpose()?;
+    let y_dec = y_position
+        .map(|v| rust_decimal::Decimal::try_from(v).map_err(|e| format!("Invalid y_position value '{}': {}", v, e)))
+        .transpose()?;
+
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO station_map_annotations (station_id, section_name, description, x_position, y_position, annotated_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
-    .bind(sid).bind(&section_name).bind(&description).bind(x_position).bind(y_position).bind(session.user_id)
+    .bind(sid).bind(&section_name).bind(&description).bind(x_dec).bind(y_dec).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
@@ -291,10 +298,14 @@ pub async fn submit_station_supply_request(
     let session = validate_session_command(&token).await?;
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
+    let cost_dec = total_cost
+        .map(|v| rust_decimal::Decimal::try_from(v).map_err(|e| format!("Invalid total_cost value '{}': {}", v, e)))
+        .transpose()?;
+
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO station_supply_requests (station_id, title, items, total_cost, status, requested_by) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id"
     )
-    .bind(sid).bind(&title).bind(&items).bind(total_cost).bind(session.user_id)
+    .bind(sid).bind(&title).bind(&items).bind(cost_dec).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
