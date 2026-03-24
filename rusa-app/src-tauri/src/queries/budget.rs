@@ -189,6 +189,8 @@ pub async fn link_budget_request_to_vote(
     .await?;
     Ok(())
 }
+
+pub async fn insert_investigation(
     title: &str,
     description: &str,
     related_report_id: Option<Uuid>,
