@@ -25,6 +25,7 @@ pub async fn cast_vote(
     token: String,
     vote_id: String,
     decision: String,
+    reason: String,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
     // Directors only vote
@@ -32,9 +33,13 @@ pub async fn cast_vote(
         return Err("Only directors can cast votes".to_string());
     }
 
+    if reason.trim().is_empty() {
+        return Err("A reason is required when casting a vote".to_string());
+    }
+
     let vid = Uuid::parse_str(&vote_id).map_err(|_| "Invalid vote ID".to_string())?;
 
-    // Check that the vote is still open and within the 15-minute window
+    // Check that the vote is still open and within the current window
     let vote_check = governance_queries::check_vote_status(vid)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
@@ -45,16 +50,21 @@ pub async fn cast_vote(
     }
     if let Some(dl) = vdeadline {
         if chrono::Utc::now() > dl {
-            return Err("Voting window has expired (15-minute limit reached)".to_string());
+            return Err("Voting window has expired".to_string());
         }
     }
 
     // Upsert: allow switching within the time window
-    governance_queries::upsert_vote_ballot(vid, session.user_id, &decision)
+    governance_queries::upsert_vote_ballot(vid, session.user_id, &decision, &reason)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision }))).await;
+    // Try to resolve immediately if quorum (8 directors) is now met
+    governance_queries::try_resolve_vote_on_quorum(vid)
+        .await
+        .ok(); // best-effort — don't fail the cast on resolution error
+
+    let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision, "reason": reason }))).await;
     Ok(())
 }
 

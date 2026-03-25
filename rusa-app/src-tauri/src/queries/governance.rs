@@ -112,32 +112,123 @@ pub async fn upsert_vote_ballot(
     vote_id: Uuid,
     voter_id: Uuid,
     decision: &str,
+    reasoning: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, voted_at = NOW()"#,
+        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, reasoning, voted_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, reasoning = $4, voted_at = NOW()"#,
     )
     .bind(vote_id)
     .bind(voter_id)
     .bind(decision)
+    .bind(reasoning)
     .execute(get_db())
     .await?;
     Ok(())
 }
 
-pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"UPDATE votes SET status = CASE
-            WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
-                 (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'no')
-            THEN 'passed'
-            ELSE 'failed'
-        END
-        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()"#,
+/// Count ballots cast for a given vote.
+pub async fn count_vote_ballots(vote_id: Uuid) -> Result<i64, sqlx::Error> {
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1",
     )
-    .execute(get_db())
+    .bind(vote_id)
+    .fetch_one(get_db())
     .await?;
+    Ok(row.0)
+}
+
+/// Try to resolve a vote immediately if quorum (8 directors) has been reached.
+/// Returns true if the vote was resolved.
+pub async fn try_resolve_vote_on_quorum(vote_id: Uuid) -> Result<bool, sqlx::Error> {
+    const QUORUM: i64 = 8;
+
+    // Count all ballots
+    let total = count_vote_ballots(vote_id).await?;
+    if total < QUORUM {
+        return Ok(false);
+    }
+
+    // Count yes/no/abstain
+    let counts: (i64, i64, i64) = sqlx::query_as(
+        r#"SELECT
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'yes'),
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'no'),
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'abstain')"#,
+    )
+    .bind(vote_id)
+    .fetch_one(get_db())
+    .await?;
+
+    let (yes_count, no_count, abstain_count) = counts;
+
+    // All-abstain → auto-deny
+    let new_status = if abstain_count == total {
+        "failed"
+    } else if yes_count > no_count {
+        "passed"
+    } else {
+        "failed"
+    };
+
+    sqlx::query("UPDATE votes SET status = $1 WHERE id = $2 AND status = 'open'")
+        .bind(new_status)
+        .bind(vote_id)
+        .execute(get_db())
+        .await?;
+
+    Ok(true)
+}
+
+pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
+    // Fetch open expired votes
+    let expired_ids: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM votes WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()",
+    )
+    .fetch_all(get_db())
+    .await?;
+
+    for (vote_id,) in expired_ids {
+        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+            r#"SELECT
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'yes'),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'no'),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'abstain')"#,
+        )
+        .bind(vote_id)
+        .fetch_one(get_db())
+        .await?;
+
+        let (total, yes_count, _no_count, abstain_count) = counts;
+        const QUORUM: i64 = 8;
+
+        if total < QUORUM {
+            // Quorum not met — snooze by extending deadline another 15 minutes
+            sqlx::query(
+                "UPDATE votes SET deadline = NOW() + INTERVAL '15 minutes' WHERE id = $1 AND status = 'open'",
+            )
+            .bind(vote_id)
+            .execute(get_db())
+            .await?;
+        } else {
+            // Quorum met — resolve
+            let new_status = if abstain_count == total {
+                "failed" // all abstain = auto-deny
+            } else if yes_count > _no_count {
+                "passed"
+            } else {
+                "failed"
+            };
+            sqlx::query("UPDATE votes SET status = $1 WHERE id = $2 AND status = 'open'")
+                .bind(new_status)
+                .bind(vote_id)
+                .execute(get_db())
+                .await?;
+        }
+    }
+
     Ok(())
 }
 
