@@ -47,8 +47,8 @@ export const researchApi = {
   approveConclusion: (token: string, experimentId: string, decision: string, reviewNotes?: string) =>
     invoke<void>('approve_experiment_conclusion', { token, experimentId, decision, reviewNotes }),
   getSpeciesArchive: (token: string) => invoke<any[]>('get_species_archive', { token }),
-  addSpecies: (token: string, name: string, classification?: string, description?: string, habitat?: string) =>
-    invoke<string>('add_species', { token, name, classification, description, habitat }),
+  addSpecies: (token: string, name: string, classification?: string, description?: string, habitat?: string, speciesCategory?: string) =>
+    invoke<string>('add_species', { token, name, classification, description, habitat, speciesCategory }),
   getTestArchive: (token: string) => invoke<any[]>('get_test_archive', { token }),
   proposeTest: (token: string, title: string, description?: string, methodology?: string) =>
     invoke<string>('propose_test', { token, title, description, methodology }),
@@ -406,6 +406,17 @@ export const aerospaceApi = {
     invoke<void>('review_blueprint_proposal', { token, proposalId, status, notes }),
   updateShipStatus: (token: string, shipId: string, status: string) =>
     invoke<void>('update_ship_status', { token, shipId, status }),
+  requestTaskConclusion: (token: string, taskId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
+    invoke<void>('request_aerospace_task_conclusion', { token, taskId, finalNotes, finalFindings, methodologySummary, keyResults, recommendations, limitations }),
+  approveTaskConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('approve_aerospace_task_conclusion', { token, taskId, decision, reviewNotes }),
+  getAllShips: (token: string) => invoke<any[]>('get_all_ships', { token }),
+  getShipDetails: (token: string, shipId: string) => invoke<any>('get_ship_details', { token, shipId }),
+  submitHelpRequest: (token: string, title: string, description?: string, category?: string) =>
+    invoke<string>('submit_help_request', { token, title, description, category }),
+  getHelpRequests: (token: string) => invoke<any[]>('get_help_requests', { token }),
+  resolveHelpRequest: (token: string, requestId: string, status: string, response?: string) =>
+    invoke<void>('resolve_help_request', { token, requestId, status, response }),
 };
 
 // Admin

@@ -5,11 +5,11 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
-  import { researchApi, researchTaskApi, userApi } from '$lib/api';
+  import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);
@@ -32,6 +32,18 @@
   let speciesClass = $state('');
   let speciesDesc = $state('');
   let speciesHabitat = $state('');
+  let speciesCategory = $state('unknown');
+
+  // Help request form (research/biological/agricultural engineers)
+  let helpReqOpen = $state(false);
+  let hrTitle = $state('');
+  let hrDesc = $state('');
+  let hrCategory = $state('');
+  let helpRequests: any[] = $state([]);
+  let helpResolveOpen = $state(false);
+  let helpResolveTarget: any = $state(null);
+  let helpResolveStatus = $state('in_review');
+  let helpResolveResponse = $state('');
 
   // Test form
   let testOpen = $state(false);
@@ -118,6 +130,11 @@
 
   const isTaskmaster = $derived($session?.role_name === 'the_taskmaster');
   const isObserver = $derived($session?.role_name === 'the_observer');
+  const isResearchEngineer = $derived(
+    $session?.role_name === 'biological_engineer' ||
+    $session?.role_name === 'agricultural_engineer'
+  );
+  const isAgriculturalEngineer = $derived($session?.role_name === 'agricultural_engineer');
 
   const canReviewExperiment = $derived(
     $session?.role_name === 'the_observer' ||
@@ -146,11 +163,12 @@
     if (!s) return;
     loading = true;
     try {
-      [experiments, species, tests, researchTasks] = await Promise.all([
+      [experiments, species, tests, researchTasks, helpRequests] = await Promise.all([
         researchApi.getExperiments(s.token),
         researchApi.getSpeciesArchive(s.token),
         researchApi.getTestArchive(s.token),
         researchTaskApi.getTasks(s.token),
+        aerospaceApi.getHelpRequests(s.token),
       ]);
       allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
@@ -172,9 +190,9 @@
     const s = $session; if (!s) return;
     if (!speciesName) { showToast('Name required', 'error'); return; }
     try {
-      await researchApi.addSpecies(s.token, speciesName, speciesClass || undefined, speciesDesc || undefined, speciesHabitat || undefined);
+      await researchApi.addSpecies(s.token, speciesName, speciesClass || undefined, speciesDesc || undefined, speciesHabitat || undefined, speciesCategory || undefined);
       showToast('Species added', 'success');
-      speciesOpen = false; speciesName = ''; speciesClass = ''; speciesDesc = ''; speciesHabitat = '';
+      speciesOpen = false; speciesName = ''; speciesClass = ''; speciesDesc = ''; speciesHabitat = ''; speciesCategory = 'unknown';
       species = await researchApi.getSpeciesArchive(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
