@@ -2,7 +2,7 @@
   import PageShell from '$lib/components/PageShell.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import { session } from '$lib/stores/auth';
-  import { messageApi, userApi } from '$lib/api';
+  import { messageApi, userApi, researchTaskApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
@@ -26,6 +26,57 @@
   let body = $state('');
 
   let unlisten: (() => void) | null = null;
+
+  // Proxy flow: Convert inbox message to research task (Observer/Artificer/Taskmaster)
+  const canConvertToTask = $derived(
+    $session?.role_name === 'the_observer' ||
+    $session?.role_name === 'the_artificer' ||
+    $session?.role_name === 'the_taskmaster'
+  );
+  let convertTaskOpen = $state(false);
+  let ctTitle = $state('');
+  let ctDesc = $state('');
+  let ctAssigneeSelected: any = $state(null);
+  let ctDue = $state('');
+  let ctSourceMsgId = $state('');
+  let ctUserSearch = $state('');
+
+  let ctUserSuggestions = $derived(
+    ctUserSearch.length > 0
+      ? allUsers.filter((u: any) =>
+          u.id !== ctAssigneeSelected?.id &&
+          (u.username?.toLowerCase().includes(ctUserSearch.toLowerCase()) ||
+           u.full_name?.toLowerCase().includes(ctUserSearch.toLowerCase()))
+        ).slice(0, 8)
+      : []
+  );
+
+  function openConvertToTask(msg: any) {
+    ctSourceMsgId = msg.id;
+    ctTitle = msg.subject || '';
+    ctDesc = '';
+    ctAssigneeSelected = null;
+    ctDue = '';
+    ctUserSearch = '';
+    convertTaskOpen = true;
+  }
+
+  async function submitConvertToTask() {
+    const s = $session; if (!s) return;
+    if (!ctTitle.trim()) { showToast('Title required', 'error'); return; }
+    try {
+      await researchTaskApi.assign(
+        s.token,
+        ctTitle,
+        ctDesc || undefined,
+        ctAssigneeSelected?.id || undefined,
+        ctSourceMsgId || undefined,
+        ctDue ? new Date(ctDue).toISOString() : undefined,
+      );
+      showToast('Help request converted to research task', 'success');
+      convertTaskOpen = false;
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
 
   onMount(async () => {
     const s = $session;
@@ -182,6 +233,9 @@
           {#if activeTab === 'sent' && !selectedMessage.recalled_at}
             <button class="recall-btn" onclick={() => recallMessage(selectedMessage)}>Recall Message</button>
           {/if}
+          {#if canConvertToTask && activeTab === 'inbox' && !selectedMessage.recalled_at}
+            <button class="convert-btn" onclick={() => openConvertToTask(selectedMessage)}>🔁 Convert to Research Task</button>
+          {/if}
         </div>
         <div class="msg-body">{selectedMessage.body}</div>
       {:else}
@@ -312,4 +366,8 @@
   .suggestion-role { color: #4a5d82; font-size: 0.75rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .convert-btn { margin-top: 0.75rem; background: none; border: 1px solid #3d7fff; border-radius: 4px; color: #3d7fff; cursor: pointer; font-size: 0.8rem; padding: 0.375rem 0.75rem; }
+  .convert-form { display: flex; flex-direction: column; gap: 1rem; }
+  .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
+  .proxy-note { background: rgba(61,127,255,0.07); border: 1px solid rgba(61,127,255,0.2); border-radius: 4px; color: #8fa3cc; font-size: 0.8rem; margin: 0; padding: 0.5rem 0.75rem; }
 </style>

@@ -178,6 +178,9 @@ pub async fn try_resolve_vote_on_quorum(vote_id: Uuid) -> Result<bool, sqlx::Err
         .execute(get_db())
         .await?;
 
+    // Notify initiator and update linked general_requests
+    notify_vote_resolution(vote_id, new_status).await.ok();
+
     Ok(true)
 }
 
@@ -226,6 +229,106 @@ pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
                 .bind(vote_id)
                 .execute(get_db())
                 .await?;
+
+            // Notify initiator and update linked general_requests
+            notify_vote_resolution(vote_id, new_status).await.ok();
+        }
+    }
+
+    Ok(())
+}
+
+/// After a vote resolves, send an in-app notification message to the initiator
+/// and auto-update any linked general_request to match the vote outcome.
+async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx::Error> {
+    // Fetch vote title and initiator
+    let row: Option<(Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT title, initiated_by FROM votes WHERE id = $1",
+    )
+    .bind(vote_id)
+    .fetch_optional(get_db())
+    .await?;
+
+    let (title, initiated_by) = match row {
+        Some((t, i)) => (t.unwrap_or_default(), i),
+        None => return Ok(()),
+    };
+
+    // Auto-update linked general_requests
+    let gr_outcome = if outcome == "passed" { "approved" } else { "rejected" };
+    sqlx::query(
+        "UPDATE general_requests SET status = $1 WHERE vote_id = $2 AND status = 'under_vote'",
+    )
+    .bind(gr_outcome)
+    .bind(vote_id)
+    .execute(get_db())
+    .await
+    .ok();
+
+    // Send a self-notification message to the initiator
+    if let Some(initiator_id) = initiated_by {
+        let outcome_label = if outcome == "passed" { "PASSED ✅" } else { "FAILED ❌" };
+        let subject = format!("Vote Result: {} — {}", outcome_label, title);
+        let body = format!(
+            "The director vote for \"{}\" has concluded.\nOutcome: {}\n\nYou may review the full vote details in the Governance section.",
+            title, outcome_label
+        );
+        // Insert a notification message (self-addressed: from=to=initiator)
+        let msg_row: Result<(Uuid,), _> = sqlx::query_as(
+            "INSERT INTO messages (from_user_id, subject, body, is_draft) VALUES ($1,$2,$3,false) RETURNING id",
+        )
+        .bind(initiator_id)
+        .bind(&subject)
+        .bind(&body)
+        .fetch_one(get_db())
+        .await;
+
+        if let Ok((msg_id,)) = msg_row {
+            sqlx::query(
+                "INSERT INTO message_recipients (message_id, recipient_id, recipient_type) VALUES ($1,$2,'to')",
+            )
+            .bind(msg_id)
+            .bind(initiator_id)
+            .execute(get_db())
+            .await
+            .ok();
+        }
+
+        // Also notify the original requester if this came from a general_request
+        let gr_requester: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT requested_by FROM general_requests WHERE vote_id = $1 AND requested_by != $2 LIMIT 1",
+        )
+        .bind(vote_id)
+        .bind(initiator_id)
+        .fetch_optional(get_db())
+        .await
+        .unwrap_or(None);
+
+        if let Some((requester_id,)) = gr_requester {
+            let req_subject = format!("Your request vote has {}", if outcome == "passed" { "passed ✅" } else { "failed ❌" });
+            let req_body = format!(
+                "The directors' vote linked to your request \"{}\" has concluded with outcome: {}.\n\nYou may view the result in the Governance section.",
+                title, outcome_label
+            );
+            let req_msg: Result<(Uuid,), _> = sqlx::query_as(
+                "INSERT INTO messages (from_user_id, subject, body, is_draft) VALUES ($1,$2,$3,false) RETURNING id",
+            )
+            .bind(initiator_id) // sent by initiator (Director who ran the vote)
+            .bind(&req_subject)
+            .bind(&req_body)
+            .fetch_one(get_db())
+            .await;
+
+            if let Ok((req_msg_id,)) = req_msg {
+                sqlx::query(
+                    "INSERT INTO message_recipients (message_id, recipient_id, recipient_type) VALUES ($1,$2,'to')",
+                )
+                .bind(req_msg_id)
+                .bind(requester_id)
+                .execute(get_db())
+                .await
+                .ok();
+            }
         }
     }
 
