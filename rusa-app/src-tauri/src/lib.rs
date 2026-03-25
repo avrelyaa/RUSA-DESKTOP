@@ -139,6 +139,10 @@ pub fn run() {
             commands::aerospace_commands::assign_aerospace_task,
             commands::aerospace_commands::get_aerospace_assigned_tasks,
             commands::aerospace_commands::update_aerospace_task_status,
+            commands::aerospace_commands::submit_blueprint_proposal,
+            commands::aerospace_commands::get_blueprint_proposals,
+            commands::aerospace_commands::review_blueprint_proposal,
+            commands::aerospace_commands::update_ship_status,
             // station
             commands::station_commands::get_stations,
             commands::station_commands::get_station_inventory,

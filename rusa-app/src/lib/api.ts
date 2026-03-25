@@ -399,6 +399,13 @@ export const aerospaceApi = {
   getAssignedTasks: (token: string) => invoke<any[]>('get_aerospace_assigned_tasks', { token }),
   updateTaskStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
     invoke<void>('update_aerospace_task_status', { token, taskId, status, progressNotes }),
+  submitBlueprintProposal: (token: string, shipName: string, blueprintDescription: string, designSpecs?: string, shipId?: string) =>
+    invoke<string>('submit_blueprint_proposal', { token, shipName, blueprintDescription, designSpecs, shipId }),
+  getBlueprintProposals: (token: string) => invoke<any[]>('get_blueprint_proposals', { token }),
+  reviewBlueprintProposal: (token: string, proposalId: string, status: string, notes?: string) =>
+    invoke<void>('review_blueprint_proposal', { token, proposalId, status, notes }),
+  updateShipStatus: (token: string, shipId: string, status: string) =>
+    invoke<void>('update_ship_status', { token, shipId, status }),
 };
 
 // Admin

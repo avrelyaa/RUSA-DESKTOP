@@ -365,6 +365,30 @@ pub async fn complete_mission(mission_id: Uuid) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Retrieve the user who submitted a given conclusion request.
+pub async fn get_conclusion_request_submitter(
+    request_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let row: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT submitted_by FROM mission_conclusion_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_optional(get_db())
+    .await?;
+    Ok(row.and_then(|(id,)| id))
+}
+
+/// Increment the mission_counter for a user (called when an astronaut's conclusion is approved).
+pub async fn increment_mission_counter(user_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET mission_counter = mission_counter + 1 WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct PlanetRow {
     pub id: Uuid,

@@ -441,7 +441,7 @@
             <div class="vote-right">
               <span class="status-badge status-{vote.status}">{vote.status}</span>
               {#if vote.vote_type}
-                <span class="vote-type-badge vote-type-{vote.vote_type}">{vote.vote_type === 'general' ? '🗳 General' : vote.vote_type === 'budget' ? '💰 Budget' : '⚡ Pressing'}</span>
+                <span class="vote-type-badge vote-type-{vote.vote_type}">{vote.vote_type === 'general' ? '🗳 General' : vote.vote_type === 'budget' ? '💰 Budget' : vote.vote_type === 'blueprint' ? '📐 Blueprint' : '⚡ Pressing'}</span>
               {/if}
               {#if vote.status === 'open' && vote.deadline && !isExpired(vote.deadline)}
                 <span class="countdown">⏱ {getTimeRemaining(vote.deadline)}</span>
@@ -818,6 +818,7 @@
   .vote-type-general { background: rgba(0,212,255,0.1); color: #00d4ff; border: 1px solid rgba(0,212,255,0.2); }
   .vote-type-budget { background: rgba(255,200,0,0.1); color: #ffc800; border: 1px solid rgba(255,200,0,0.25); }
   .vote-type-pressing_issue { background: rgba(255,100,68,0.1); color: #ff6444; border: 1px solid rgba(255,100,68,0.25); }
+  .vote-type-blueprint { background: rgba(156,39,176,0.12); color: #ce93d8; border: 1px solid rgba(156,39,176,0.3); }
   .bypass-info-row { display: flex; align-items: center; gap: 0.5rem; flex: 1; padding-left: 1rem; }
   .vote-system-note { background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.15); border-radius: 4px; color: #8fa3cc; font-size: 0.82rem; margin-bottom: 0.75rem; padding: 0.6rem 0.85rem; }
   .vote-id-code { background: rgba(255,255,255,0.05); border-radius: 3px; color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.72rem; padding: 1px 4px; }
