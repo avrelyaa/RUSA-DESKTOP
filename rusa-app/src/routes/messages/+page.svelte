@@ -51,13 +51,17 @@
       : []
   );
 
-  function openConvertToTask(msg: any) {
+  async function openConvertToTask(msg: any) {
+    const s = $session; if (!s) return;
     ctSourceMsgId = msg.id;
     ctTitle = msg.subject || '';
     ctDesc = '';
     ctAssigneeSelected = null;
     ctDue = '';
     ctUserSearch = '';
+    if (allUsers.length === 0) {
+      try { allUsers = await userApi.getAll(s.token); } catch {}
+    }
     convertTaskOpen = true;
   }
 
@@ -315,6 +319,47 @@
     <div class="compose-actions">
       <button class="btn-secondary" onclick={() => composeOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={sendMessage}>Send Message</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={convertTaskOpen} title="Convert Message to Research Task">
+  <div class="convert-form">
+    <p class="proxy-note">This message will be linked to the new research task as its source.</p>
+    <div class="field">
+      <label class="field-label" for="ct-title">Task Title *</label>
+      <input id="ct-title" class="field-input" bind:value={ctTitle} placeholder="Task title…" />
+    </div>
+    <div class="field">
+      <label class="field-label" for="ct-desc">Description</label>
+      <textarea id="ct-desc" class="field-input" bind:value={ctDesc} placeholder="Optional description…" rows="3"></textarea>
+    </div>
+    <div class="field">
+      <label class="field-label" for="ct-assignee">Assign To</label>
+      <div class="recipient-tokens">
+        {#if ctAssigneeSelected}
+          <span class="token">{ctAssigneeSelected.full_name || ctAssigneeSelected.username}<button class="token-remove" onclick={() => { ctAssigneeSelected = null; ctUserSearch = ''; }}>×</button></span>
+        {:else}
+          <div class="autocomplete-wrap">
+            <input id="ct-assignee" class="field-input inline-input" bind:value={ctUserSearch} placeholder="Search user…" />
+            {#if ctUserSuggestions.length > 0}
+              <div class="suggestions">
+                {#each ctUserSuggestions as u}
+                  <button class="suggestion-item" onclick={() => { ctAssigneeSelected = u; ctUserSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="ct-due">Due Date</label>
+      <input id="ct-due" class="field-input" type="date" bind:value={ctDue} />
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => convertTaskOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitConvertToTask}>Create Task</button>
     </div>
   </div>
 </Modal>
