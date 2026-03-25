@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { sanitaryApi, governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -71,7 +72,10 @@
   let inspViolations = $state('');
   let inspRecommendations = $state('');
 
-  const isHead = $derived($session?.role_name === 'head_of_sanitary');
+  const isHead = $derived(canPerform($session, 'head_of_sanitary'));
+  const isDisposalCrew = $derived(canPerform($session, 'disposal_crew'));
+  const isWastewaterCrew = $derived(canPerform($session, 'wastewater_crew'));
+  const isInspector = $derived(canPerform($session, 'sanitary_inspector'));
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -304,25 +308,33 @@
   {:else if activeTab === 'inventory'}
     <div class="section-bar">
       <h2 class="section-title">Sanitary Inventory</h2>
-      <button class="btn-primary" onclick={() => invOpen = true}>+ Update Inventory</button>
+      {#if isHead}
+        <button class="btn-primary" onclick={() => invOpen = true}>+ Update Inventory</button>
+      {/if}
     </div>
     <Table columns={invCols} rows={inventory} />
   {:else if activeTab === 'disposal'}
     <div class="section-bar">
       <h2 class="section-title">Disposal Logs</h2>
-      <button class="btn-primary" onclick={() => disposalOpen = true}>+ Log Disposal</button>
+      {#if isDisposalCrew}
+        <button class="btn-primary" onclick={() => disposalOpen = true}>+ Log Disposal</button>
+      {/if}
     </div>
     <Table columns={disposalCols} rows={disposalLogs} />
   {:else if activeTab === 'wastewater'}
     <div class="section-bar">
       <h2 class="section-title">Wastewater Treatment Logs</h2>
-      <button class="btn-primary" onclick={() => wwOpen = true}>+ Add Log</button>
+      {#if isWastewaterCrew}
+        <button class="btn-primary" onclick={() => wwOpen = true}>+ Add Log</button>
+      {/if}
     </div>
     <Table columns={wwCols} rows={wastewaterLogs} />
   {:else if activeTab === 'inspections'}
     <div class="section-bar">
       <h2 class="section-title">Inspection Reports</h2>
-      <button class="btn-primary" onclick={() => inspOpen = true}>+ Create Report</button>
+      {#if isInspector}
+        <button class="btn-primary" onclick={() => inspOpen = true}>+ Create Report</button>
+      {/if}
     </div>
     <Table columns={inspCols} rows={inspections} />
   {/if}

@@ -5,6 +5,7 @@
   import { showToast } from '$lib/stores/toast';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import { canPerform } from '$lib/stores/permissions';
 
   let currentPath = $derived($page.url.pathname);
 
@@ -41,7 +42,11 @@
     const s = $session;
     if (!s) return false;
     if (item.minTier && s.tier < item.minTier) return false;
-    if (item.roles && !item.roles.includes(s.role_name) && s.tier < 4) return false;
+    if (item.roles) {
+      // Allow if own role or an inherited role matches any entry in the list
+      const hasRole = item.roles.some(r => canPerform(s, r));
+      if (!hasRole && s.tier < 4) return false;
+    }
     return true;
   }
 

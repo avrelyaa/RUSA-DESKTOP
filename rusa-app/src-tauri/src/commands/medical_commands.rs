@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::budget as budget_queries;
@@ -89,7 +89,7 @@ pub async fn get_medical_tasks(token: String) -> Result<Vec<serde_json::Value>, 
 
     ensure_medical_tasks_table().await?;
 
-    let rows = if session.role_name == "head_of_medicine" {
+    let rows = if permissions::has_permission(&session.role_name, "head_of_medicine") {
         sqlx::query_as::<_, MedicalTaskRow>(
             "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM medical_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
@@ -180,7 +180,7 @@ pub async fn allocate_shift(
 pub async fn get_shifts(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "head_of_medicine" {
+    let rows = if permissions::has_permission(&session.role_name, "head_of_medicine") {
         medical_queries::get_all_medical_shifts().await
     } else {
         medical_queries::get_user_medical_shifts(session.user_id).await

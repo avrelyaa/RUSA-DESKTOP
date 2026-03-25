@@ -68,4 +68,6 @@ pub struct SessionData {
     pub tier: i32,
     pub subsystem: Option<String>,
     pub token: String,
+    /// Role names that this user's role inherits permissions from.
+    pub inherited_permissions: Vec<String>,
 }

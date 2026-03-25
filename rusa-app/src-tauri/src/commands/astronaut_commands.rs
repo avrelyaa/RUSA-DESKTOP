@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::queries::astronaut as astronaut_queries;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -290,7 +290,9 @@ pub async fn get_conclusion_requests(token: String) -> Result<Vec<serde_json::Va
         .await
         .map_err(|e| format!("DB error creating table: {}", e))?;
 
-    let rows = if session.role_name == "the_wanderer" || session.role_name == "the_taskmaster" {
+    let rows = if permissions::has_permission(&session.role_name, "the_wanderer")
+        || permissions::has_permission(&session.role_name, "the_taskmaster")
+    {
         astronaut_queries::get_all_conclusion_requests().await
     } else {
         astronaut_queries::get_user_conclusion_requests(session.user_id).await

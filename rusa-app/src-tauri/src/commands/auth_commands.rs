@@ -1,4 +1,4 @@
-use crate::auth::{invalidate_session_cache, validate_session_command};
+use crate::auth::{invalidate_session_cache, permissions, validate_session_command};
 use crate::db;
 use crate::models::user::SessionData;
 use crate::queries::auth::{
@@ -33,6 +33,7 @@ pub async fn login(username: String, password: String) -> Result<SessionData, St
         tier,
         subsystem: subsystem.clone(),
         token: token.clone(),
+        inherited_permissions: permissions::build_inherited_permissions(&role_name),
     };
 
     // Cache session in Redis

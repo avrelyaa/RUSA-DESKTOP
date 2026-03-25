@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { medicalApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -61,7 +62,7 @@
   let budgetAmount = $state(0);
   let budgetItems = $state('');
 
-  const isHead = $derived($session?.role_name === 'head_of_medicine');
+  const isHead = $derived(canPerform($session, 'head_of_medicine'));
 
 
 

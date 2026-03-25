@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::security as security_queries;
 use uuid::Uuid;
@@ -256,7 +256,9 @@ pub async fn get_security_tasks(token: String) -> Result<Vec<serde_json::Value>,
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let rows = if session.role_name == "the_guardian" || session.role_name == "the_overseer" {
+    let rows = if permissions::has_permission(&session.role_name, "the_guardian")
+        || permissions::has_permission(&session.role_name, "the_overseer")
+    {
         security_queries::get_security_tasks_for_assigner(session.user_id).await
     } else {
         security_queries::get_security_tasks_for_user(session.user_id).await

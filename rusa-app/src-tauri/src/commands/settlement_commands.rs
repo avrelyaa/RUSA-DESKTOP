@@ -1,4 +1,4 @@
-use crate::auth::{require_role, require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -82,7 +82,7 @@ pub async fn get_settlements(token: String) -> Result<Vec<serde_json::Value>, St
 pub async fn get_settler_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "settler_commander" || session.tier >= 3 {
+    let rows = if permissions::has_permission(&session.role_name, "settler_commander") || session.tier >= 3 {
         sqlx::query_as::<_, SettlerTaskRow>(
             "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
@@ -431,7 +431,10 @@ struct FarmReportRow {
 pub async fn get_farm_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "farmer" || session.role_name == "settler_commander" || session.tier >= 3 {
+    let rows = if permissions::has_permission(&session.role_name, "farmer")
+        || permissions::has_permission(&session.role_name, "settler_commander")
+        || session.tier >= 3
+    {
         sqlx::query_as::<_, FarmReportRow>(
             "SELECT id, settlement_id, farmer_id, title, content, crop_status, health_check_notes, created_at FROM farm_progress_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
@@ -485,7 +488,7 @@ pub async fn submit_troublesome_settler_report(
 pub async fn get_troublesome_settler_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "settler_commander" || session.tier >= 3 {
+    let rows = if permissions::has_permission(&session.role_name, "settler_commander") || session.tier >= 3 {
         sqlx::query_as::<_, TroublesomeSettlerReportRow>(
             "SELECT id, reported_settler_id, reported_by, settlement_id, description, status, house_arrest_id, send_to_earth_id, created_at FROM troublesome_settler_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
@@ -552,7 +555,10 @@ pub async fn submit_civil_engineer_report(
 pub async fn get_civil_engineer_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "civil_engineer" || session.role_name == "settler_commander" || session.tier >= 3 {
+    let rows = if permissions::has_permission(&session.role_name, "civil_engineer")
+        || permissions::has_permission(&session.role_name, "settler_commander")
+        || session.tier >= 3
+    {
         sqlx::query_as::<_, CivilEngineerProgressReportRow>(
             "SELECT id, task_id, settlement_id, title, content, materials_used, progress_percentage, problems_encountered, plans_next_steps, submitted_by, created_at FROM civil_engineer_progress_reports WHERE deleted_at IS NULL ORDER BY created_at DESC"
         ).fetch_all(db::get_db()).await
