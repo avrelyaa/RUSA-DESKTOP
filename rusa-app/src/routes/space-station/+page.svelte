@@ -175,7 +175,7 @@
     if (!abandonReason.trim()) { showToast('Reason required', 'error'); return; }
     try {
       await stationApi.submitAbandonment(s.token, selectedStation, abandonReason);
-      showToast('Abandonment request submitted', 'success');
+      showToast('Abandonment request submitted — a Director vote has been automatically initiated', 'success');
       abandonOpen = false; abandonReason = '';
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -390,7 +390,7 @@
 <Modal bind:open={abandonOpen} title="Request Station Abandonment">
   <div class="form">
     <div class="warning-block">
-      ⚠ This will submit a formal request to abandon the selected station. This action requires director approval.
+      ⚠ This will submit a formal request to abandon the selected station. Submitting this request will <strong>automatically initiate a Director vote</strong>. Abandonment requires the vote to pass (quorum: 8 of 13 Directors).
     </div>
     <p class="info-text">Station: <strong>{stations.find(s => s.id === selectedStation)?.name ?? '—'}</strong></p>
     <Field label="Reason for Abandonment" type="textarea" bind:value={abandonReason} rows={5} required />

@@ -1,6 +1,7 @@
 use crate::auth::{require_role, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
+use crate::queries::governance as governance_queries;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -345,6 +346,7 @@ pub async fn submit_station_abandonment(
     let session = validate_session_command(&token).await?;
     let sid = Uuid::parse_str(&station_id).map_err(|_| "Invalid station ID".to_string())?;
 
+    // Insert the abandonment request
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO station_abandonment_requests (station_id, reason, status, requested_by) VALUES ($1,$2,'pending',$3) RETURNING id"
     )
@@ -353,6 +355,45 @@ pub async fn submit_station_abandonment(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_STATION_ABANDONMENT", Some("station_abandonment_requests"), Some(row.0), None, Some(serde_json::json!({ "station_id": station_id, "reason": reason }))).await;
-    Ok(row.0.to_string())
+    let abandonment_id = row.0;
+
+    // Fetch the station name for the vote title
+    let station_name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM stations WHERE id = $1"
+    )
+    .bind(sid)
+    .fetch_optional(db::get_db())
+    .await
+    .ok()
+    .flatten();
+
+    let name_label = station_name.as_deref().unwrap_or("Unknown Station");
+
+    // Auto-initiate a director vote for this abandonment request
+    let vote_title = format!("Station Abandonment: {}", name_label);
+    let vote_desc = format!(
+        "Abandonment request submitted by user {}. Reason: {}",
+        session.user_id, reason
+    );
+    let vote_id = governance_queries::insert_vote_typed(
+        &vote_title,
+        Some(&vote_desc),
+        session.user_id,
+        "pressing_issue",
+    )
+    .await
+    .map_err(|e| format!("DB error creating vote: {}", e))?;
+
+    // Link the vote back to the abandonment request
+    sqlx::query(
+        "UPDATE station_abandonment_requests SET vote_id = $1 WHERE id = $2"
+    )
+    .bind(vote_id)
+    .bind(abandonment_id)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error linking vote: {}", e))?;
+
+    let _ = write_audit_log(Some(session.user_id), "SUBMIT_STATION_ABANDONMENT", Some("station_abandonment_requests"), Some(abandonment_id), None, Some(serde_json::json!({ "station_id": station_id, "reason": reason, "vote_id": vote_id.to_string() }))).await;
+    Ok(abandonment_id.to_string())
 }
