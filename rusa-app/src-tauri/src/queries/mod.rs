@@ -9,3 +9,4 @@ pub mod sanitary;
 pub mod governance;
 pub mod medical;
 pub mod general;
+pub mod aerospace;

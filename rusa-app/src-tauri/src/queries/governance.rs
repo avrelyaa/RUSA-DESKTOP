@@ -265,6 +265,16 @@ async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx
     .await
     .ok();
 
+    // Auto-update linked blueprint_proposals
+    sqlx::query(
+        "UPDATE blueprint_proposals SET status = $1 WHERE vote_id = $2 AND status = 'under_vote'",
+    )
+    .bind(gr_outcome)
+    .bind(vote_id)
+    .execute(get_db())
+    .await
+    .ok();
+
     // Send a self-notification message to the initiator
     if let Some(initiator_id) = initiated_by {
         let outcome_label = if outcome == "passed" { "PASSED ✅" } else { "FAILED ❌" };

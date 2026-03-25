@@ -361,6 +361,11 @@ pub async fn review_conclusion_request(
         astronaut_queries::complete_mission(mission_id)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
+
+        // Increment mission_counter for the astronaut who submitted the conclusion request
+        if let Ok(Some(submitter_id)) = astronaut_queries::get_conclusion_request_submitter(rid).await {
+            let _ = astronaut_queries::increment_mission_counter(submitter_id).await;
+        }
     }
 
     let _ = write_audit_log(
