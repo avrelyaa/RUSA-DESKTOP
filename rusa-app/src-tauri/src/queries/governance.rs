@@ -112,32 +112,226 @@ pub async fn upsert_vote_ballot(
     vote_id: Uuid,
     voter_id: Uuid,
     decision: &str,
+    reasoning: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, voted_at)
-           VALUES ($1, $2, $3, NOW())
-           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, voted_at = NOW()"#,
+        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, reasoning, voted_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, reasoning = $4, voted_at = NOW()"#,
     )
     .bind(vote_id)
     .bind(voter_id)
     .bind(decision)
+    .bind(reasoning)
     .execute(get_db())
     .await?;
     Ok(())
 }
 
-pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"UPDATE votes SET status = CASE
-            WHEN (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'yes') >
-                 (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = votes.id AND decision = 'no')
-            THEN 'passed'
-            ELSE 'failed'
-        END
-        WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()"#,
+/// Count ballots cast for a given vote.
+pub async fn count_vote_ballots(vote_id: Uuid) -> Result<i64, sqlx::Error> {
+    let row: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1",
     )
-    .execute(get_db())
+    .bind(vote_id)
+    .fetch_one(get_db())
     .await?;
+    Ok(row.0)
+}
+
+/// Try to resolve a vote immediately if quorum (8 directors) has been reached.
+/// Returns true if the vote was resolved.
+pub async fn try_resolve_vote_on_quorum(vote_id: Uuid) -> Result<bool, sqlx::Error> {
+    const QUORUM: i64 = 8;
+
+    // Count all ballots
+    let total = count_vote_ballots(vote_id).await?;
+    if total < QUORUM {
+        return Ok(false);
+    }
+
+    // Count yes/no/abstain
+    let counts: (i64, i64, i64) = sqlx::query_as(
+        r#"SELECT
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'yes'),
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'no'),
+            (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'abstain')"#,
+    )
+    .bind(vote_id)
+    .fetch_one(get_db())
+    .await?;
+
+    let (yes_count, no_count, abstain_count) = counts;
+
+    // All-abstain → auto-deny
+    let new_status = if abstain_count == total {
+        "failed"
+    } else if yes_count > no_count {
+        "passed"
+    } else {
+        "failed"
+    };
+
+    sqlx::query("UPDATE votes SET status = $1 WHERE id = $2 AND status = 'open'")
+        .bind(new_status)
+        .bind(vote_id)
+        .execute(get_db())
+        .await?;
+
+    // Notify initiator and update linked general_requests
+    notify_vote_resolution(vote_id, new_status).await.ok();
+
+    Ok(true)
+}
+
+pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
+    // Fetch open expired votes
+    let expired_ids: Vec<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM votes WHERE status = 'open' AND deadline IS NOT NULL AND deadline < NOW()",
+    )
+    .fetch_all(get_db())
+    .await?;
+
+    for (vote_id,) in expired_ids {
+        let counts: (i64, i64, i64, i64) = sqlx::query_as(
+            r#"SELECT
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'yes'),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'no'),
+                (SELECT COUNT(*) FROM vote_ballots WHERE vote_id = $1 AND decision = 'abstain')"#,
+        )
+        .bind(vote_id)
+        .fetch_one(get_db())
+        .await?;
+
+        let (total, yes_count, _no_count, abstain_count) = counts;
+        const QUORUM: i64 = 8;
+
+        if total < QUORUM {
+            // Quorum not met — snooze by extending deadline another 15 minutes
+            sqlx::query(
+                "UPDATE votes SET deadline = NOW() + INTERVAL '15 minutes' WHERE id = $1 AND status = 'open'",
+            )
+            .bind(vote_id)
+            .execute(get_db())
+            .await?;
+        } else {
+            // Quorum met — resolve
+            let new_status = if abstain_count == total {
+                "failed" // all abstain = auto-deny
+            } else if yes_count > _no_count {
+                "passed"
+            } else {
+                "failed"
+            };
+            sqlx::query("UPDATE votes SET status = $1 WHERE id = $2 AND status = 'open'")
+                .bind(new_status)
+                .bind(vote_id)
+                .execute(get_db())
+                .await?;
+
+            // Notify initiator and update linked general_requests
+            notify_vote_resolution(vote_id, new_status).await.ok();
+        }
+    }
+
+    Ok(())
+}
+
+/// After a vote resolves, send an in-app notification message to the initiator
+/// and auto-update any linked general_request to match the vote outcome.
+async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx::Error> {
+    // Fetch vote title and initiator
+    let row: Option<(Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT title, initiated_by FROM votes WHERE id = $1",
+    )
+    .bind(vote_id)
+    .fetch_optional(get_db())
+    .await?;
+
+    let (title, initiated_by) = match row {
+        Some((t, i)) => (t.unwrap_or_default(), i),
+        None => return Ok(()),
+    };
+
+    // Auto-update linked general_requests
+    let gr_outcome = if outcome == "passed" { "approved" } else { "rejected" };
+    sqlx::query(
+        "UPDATE general_requests SET status = $1 WHERE vote_id = $2 AND status = 'under_vote'",
+    )
+    .bind(gr_outcome)
+    .bind(vote_id)
+    .execute(get_db())
+    .await
+    .ok();
+
+    // Send a self-notification message to the initiator
+    if let Some(initiator_id) = initiated_by {
+        let outcome_label = if outcome == "passed" { "PASSED ✅" } else { "FAILED ❌" };
+        let subject = format!("Vote Result: {} — {}", outcome_label, title);
+        let body = format!(
+            "The director vote for \"{}\" has concluded.\nOutcome: {}\n\nYou may review the full vote details in the Governance section.",
+            title, outcome_label
+        );
+        // Insert a notification message (self-addressed: from=to=initiator)
+        let msg_row: Result<(Uuid,), _> = sqlx::query_as(
+            "INSERT INTO messages (from_user_id, subject, body, is_draft) VALUES ($1,$2,$3,false) RETURNING id",
+        )
+        .bind(initiator_id)
+        .bind(&subject)
+        .bind(&body)
+        .fetch_one(get_db())
+        .await;
+
+        if let Ok((msg_id,)) = msg_row {
+            sqlx::query(
+                "INSERT INTO message_recipients (message_id, recipient_id, recipient_type) VALUES ($1,$2,'to')",
+            )
+            .bind(msg_id)
+            .bind(initiator_id)
+            .execute(get_db())
+            .await
+            .ok();
+        }
+
+        // Also notify the original requester if this came from a general_request
+        let gr_requester: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT requested_by FROM general_requests WHERE vote_id = $1 AND requested_by != $2 LIMIT 1",
+        )
+        .bind(vote_id)
+        .bind(initiator_id)
+        .fetch_optional(get_db())
+        .await
+        .unwrap_or(None);
+
+        if let Some((requester_id,)) = gr_requester {
+            let req_subject = format!("Your request vote has {}", if outcome == "passed" { "passed ✅" } else { "failed ❌" });
+            let req_body = format!(
+                "The directors' vote linked to your request \"{}\" has concluded with outcome: {}.\n\nYou may view the result in the Governance section.",
+                title, outcome_label
+            );
+            let req_msg: Result<(Uuid,), _> = sqlx::query_as(
+                "INSERT INTO messages (from_user_id, subject, body, is_draft) VALUES ($1,$2,$3,false) RETURNING id",
+            )
+            .bind(initiator_id) // sent by initiator (Director who ran the vote)
+            .bind(&req_subject)
+            .bind(&req_body)
+            .fetch_one(get_db())
+            .await;
+
+            if let Ok((req_msg_id,)) = req_msg {
+                sqlx::query(
+                    "INSERT INTO message_recipients (message_id, recipient_id, recipient_type) VALUES ($1,$2,'to')",
+                )
+                .bind(req_msg_id)
+                .bind(requester_id)
+                .execute(get_db())
+                .await
+                .ok();
+            }
+        }
+    }
+
     Ok(())
 }
 

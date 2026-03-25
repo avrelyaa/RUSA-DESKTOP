@@ -5,7 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
-  import { governanceApi, userApi, generalApi } from '$lib/api';
+  import { governanceApi, userApi, generalApi, adminApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
 
@@ -28,6 +28,7 @@
   const isNomad = $derived(role === 'the_nomad');
   const isLibrarian = $derived(role === 'the_librarian');
   const isDirectorOrAbove = $derived(tier >= 3);
+  const isAdministrator = $derived(role === 'the_administrator');
 
   // Vote form
   let voteOpen = $state(false);
@@ -49,6 +50,12 @@
   let castOpen = $state(false);
   let selectedVote: any = $state(null);
   let castDecision = $state('');
+  let castReason = $state('');
+
+  // Override vote modal (Administrator)
+  let overrideOpen = $state(false);
+  let overrideVote: any = $state(null);
+  let overrideOutcome = $state('passed');
 
   // Meeting form
   let meetingOpen = $state(false);
@@ -159,9 +166,30 @@
   async function castVote() {
     const s = $session; if (!s || !selectedVote) return;
     if (!castDecision) { showToast('Decision required', 'error'); return; }
+    if (!castReason.trim()) { showToast('Reason is required when casting a vote', 'error'); return; }
     try {
-      await governanceApi.castVote(s.token, selectedVote.id, castDecision);
-      showToast('Vote cast', 'success'); castOpen = false;
+      await governanceApi.castVote(s.token, selectedVote.id, castDecision, castReason);
+      showToast('Vote cast', 'success'); castOpen = false; castReason = '';
+      votes = await governanceApi.getVotes(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function interruptVote(vote: any) {
+    const s = $session; if (!s) return;
+    if (!confirm(`Interrupt vote "${vote.title}"? This will stop the vote immediately.`)) return;
+    try {
+      await governanceApi.interruptVote(s.token, vote.id);
+      showToast('Vote interrupted', 'success');
+      votes = await governanceApi.getVotes(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitOverrideVote() {
+    const s = $session; if (!s || !overrideVote) return;
+    try {
+      await adminApi.overrideVote(s.token, overrideVote.id, overrideOutcome);
+      showToast(`Vote overridden → ${overrideOutcome}`, 'success');
+      overrideOpen = false;
       votes = await governanceApi.getVotes(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -418,9 +446,19 @@
               {/if}
               {#if vote.status === 'open' && vote.deadline && !isExpired(vote.deadline)}
                 <span class="countdown">⏱ {getTimeRemaining(vote.deadline)}</span>
-                <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castOpen = true; }}>Cast Vote</button>
+                {#if isDirectorOrAbove}
+                  <button class="btn-primary" onclick={() => { selectedVote = vote; castDecision = ''; castReason = ''; castOpen = true; }}>Cast Vote</button>
+                {/if}
+                {#if isAdministrator}
+                  <button class="btn-warn" onclick={() => interruptVote(vote)}>Interrupt</button>
+                  <button class="btn-danger" onclick={() => { overrideVote = vote; overrideOutcome = 'passed'; overrideOpen = true; }}>Override</button>
+                {/if}
               {:else if vote.status === 'open' && isExpired(vote.deadline)}
                 <span class="countdown expired-label">Resolving...</span>
+                {#if isAdministrator}
+                  <button class="btn-warn" onclick={() => interruptVote(vote)}>Interrupt</button>
+                  <button class="btn-danger" onclick={() => { overrideVote = vote; overrideOutcome = 'passed'; overrideOpen = true; }}>Override</button>
+                {/if}
               {/if}
             </div>
           </div>
@@ -532,10 +570,23 @@
     {#if selectedVote?.deadline}
       <p class="vote-timer">Time remaining: <span class="countdown">{getTimeRemaining(selectedVote.deadline)}</span></p>
     {/if}
+    <p class="quorum-note">⚖️ Quorum: 8 of 13 Directors required. Vote resolves automatically when quorum is reached.</p>
     <Field label="Your Decision" type="select" bind:value={castDecision} options={decisionOpts} required />
+    <Field label="Reason (required)" type="textarea" bind:value={castReason} rows={3} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => castOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={castVote}>Cast Vote</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={overrideOpen} title="Override Vote: {overrideVote?.title}">
+  <div class="form">
+    <div class="warning-box">⚠ Administrator override will immediately force the vote to a specific outcome, bypassing the quorum requirement.</div>
+    <Field label="Forced Outcome" type="select" bind:value={overrideOutcome} options={[{value:'passed',label:'Passed'},{value:'failed',label:'Failed'}]} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => overrideOpen = false}>Cancel</button>
+      <button class="btn-danger" onclick={submitOverrideVote}>Force Override</button>
     </div>
   </div>
 </Modal>
@@ -769,4 +820,8 @@
   .vote-system-note { background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.15); border-radius: 4px; color: #8fa3cc; font-size: 0.82rem; margin-bottom: 0.75rem; padding: 0.6rem 0.85rem; }
   .vote-id-code { background: rgba(255,255,255,0.05); border-radius: 3px; color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.72rem; padding: 1px 4px; }
   .info-text { color: #8fa3cc; font-size: 0.88rem; margin: 0; }
+  .quorum-note { background: rgba(61,127,255,0.07); border: 1px solid rgba(61,127,255,0.2); border-radius: 4px; color: #8fa3cc; font-size: 0.8rem; margin: 0; padding: 0.5rem 0.75rem; }
+  .warning-box { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3); border-radius: 4px; color: #ff4466; font-size: 0.82rem; padding: 0.75rem; }
+  .btn-warn { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.82rem; font-weight: 600; padding: 0.5rem 0.9rem; }
+  .btn-danger { background: none; border: 1px solid #ff4466; border-radius: 4px; color: #ff4466; cursor: pointer; font-size: 0.82rem; font-weight: 600; padding: 0.5rem 0.9rem; }
 </style>
