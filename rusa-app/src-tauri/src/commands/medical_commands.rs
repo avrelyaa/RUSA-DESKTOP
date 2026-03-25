@@ -212,8 +212,7 @@ pub async fn update_medical_inventory(
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     let edate = expiry_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let id = medical_queries::insert_medical_inventory(
         &item_name,
@@ -317,18 +316,34 @@ pub async fn submit_budget_request(
     items: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "head_of_medicine" && session.role_name != "head_of_sanitary" {
-        return Err("Only head of medicine or sanitary can submit budget requests".to_string());
+    if session.tier < 2 {
+        return Err("Only department heads and above can submit budget requests".to_string());
     }
 
     let amount_dec = rust_decimal::Decimal::try_from(amount)
         .map_err(|e| format!("Invalid amount value '{}': {}", amount, e))?;
+    let items_json = items.as_deref().and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Some(v);
+        }
+        let lines = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::Value::String(l.to_string()))
+            .collect::<Vec<_>>();
+        Some(serde_json::Value::Array(lines))
+    });
 
     let id = budget_queries::insert_budget_request(
         &title,
         &description,
         amount_dec,
-        items.as_deref(),
+        items_json,
         session.user_id,
     )
     .await
@@ -351,12 +366,28 @@ pub async fn submit_expenditure_report(
 
     let total_amount_dec = rust_decimal::Decimal::try_from(total_amount)
         .map_err(|e| format!("Invalid total_amount value '{}': {}", total_amount, e))?;
+    let items_json = items.as_deref().and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Some(v);
+        }
+        let lines = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::Value::String(l.to_string()))
+            .collect::<Vec<_>>();
+        Some(serde_json::Value::Array(lines))
+    });
 
     let id = budget_queries::insert_expenditure_report(
         &title,
         &description,
         total_amount_dec,
-        items.as_deref(),
+        items_json,
         invoice_data.as_deref(),
         session.user_id,
     )

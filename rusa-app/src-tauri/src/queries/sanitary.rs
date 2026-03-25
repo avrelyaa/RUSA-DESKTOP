@@ -10,7 +10,7 @@ pub struct SanitaryTaskRow {
     pub status: Option<String>,
     pub assigned_to: Option<Uuid>,
     pub assigned_by: Option<Uuid>,
-    pub due_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub due_date: Option<chrono::NaiveDate>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -66,7 +66,7 @@ pub struct DivisionTransferRow {
 pub struct InspectionReportRow {
     pub id: Uuid,
     pub location: String,
-    pub inspection_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub inspection_date: chrono::NaiveDate,
     pub findings: Option<String>,
     pub violations: Option<String>,
     pub recommendations: Option<String>,
@@ -98,7 +98,7 @@ pub async fn insert_sanitary_task(
     division: Option<&str>,
     assigned_to: Uuid,
     assigned_by: Uuid,
-    due_date: Option<chrono::DateTime<chrono::Utc>>,
+    due_date: Option<chrono::NaiveDate>,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO sanitary_tasks (title, description, division, status, assigned_to, assigned_by, due_date) VALUES ($1,$2,$3,'pending',$4,$5,$6) RETURNING id",
@@ -280,7 +280,7 @@ pub async fn insert_division_quota(
 
 pub async fn insert_inspection_report(
     location: &str,
-    inspection_date: chrono::DateTime<chrono::Utc>,
+    inspection_date: chrono::NaiveDate,
     findings: &str,
     violations: Option<&str>,
     recommendations: Option<&str>,

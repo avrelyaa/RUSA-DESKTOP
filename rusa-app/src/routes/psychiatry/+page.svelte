@@ -19,11 +19,11 @@
 
   // Register patient
   let registerOpen = $state(false);
-  let patientId = $state('');
+  let patientSelected: any = $state(null);
 
   // Schedule appointment
   let apptOpen = $state(false);
-  let apptPatient = $state('');
+  let apptPatientSelected: any = $state(null);
   let apptTime = $state('');
 
   // Complete appointment
@@ -64,22 +64,22 @@
 
   async function registerPatient() {
     const s = $session; if (!s) return;
-    if (!patientId) { showToast('Patient ID required', 'error'); return; }
+    if (!patientSelected) { showToast('Patient User required', 'error'); return; }
     try {
-      await psychiatryApi.registerPatient(s.token, patientId);
+      await psychiatryApi.registerPatient(s.token, patientSelected.id);
       showToast('Patient registered', 'success');
-      registerOpen = false; patientId = '';
+      registerOpen = false; patientSelected = null;
       patients = await psychiatryApi.getPatients(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
   async function scheduleAppointment() {
     const s = $session; if (!s) return;
-    if (!apptPatient || !apptTime) { showToast('Patient and time required', 'error'); return; }
+    if (!apptPatientSelected || !apptTime) { showToast('Patient and time required', 'error'); return; }
     try {
-      await psychiatryApi.scheduleAppointment(s.token, apptPatient, apptTime);
+      await psychiatryApi.scheduleAppointment(s.token, apptPatientSelected.id, apptTime);
       showToast('Appointment scheduled', 'success');
-      apptOpen = false; apptPatient = ''; apptTime = '';
+      apptOpen = false; apptPatientSelected = null; apptTime = '';
       appointments = await psychiatryApi.getAppointments(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -215,9 +215,12 @@
 
 <Modal bind:open={registerOpen} title="Register Patient">
   <div class="form">
-    <Field label="Patient User ID" bind:value={patientId} required />
+    <div class="field">
+      <label class="field-label">Patient User</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={patientSelected} />
+    </div>
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => registerOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { registerOpen = false; patientSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={registerPatient}>Register</button>
     </div>
   </div>
@@ -225,10 +228,13 @@
 
 <Modal bind:open={apptOpen} title="Schedule Appointment">
   <div class="form">
-    <Field label="Patient ID" bind:value={apptPatient} required />
+    <div class="field">
+      <label class="field-label">Patient User</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={apptPatientSelected} />
+    </div>
     <Field label="Scheduled Time" type="datetime-local" bind:value={apptTime} required />
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => apptOpen = false}>Cancel</button>
+      <button class="btn-secondary" onclick={() => { apptOpen = false; apptPatientSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={scheduleAppointment}>Schedule</button>
     </div>
   </div>

@@ -19,7 +19,7 @@ pub struct MedicalInventoryRow {
     pub category: Option<String>,
     pub quantity: Option<i32>,
     pub unit: Option<String>,
-    pub expiry_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub expiry_date: Option<chrono::NaiveDate>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -123,7 +123,7 @@ pub async fn insert_medical_inventory(
     category: Option<&str>,
     quantity: i32,
     unit: Option<&str>,
-    expiry_date: Option<chrono::DateTime<chrono::Utc>>,
+    expiry_date: Option<chrono::NaiveDate>,
     updated_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(

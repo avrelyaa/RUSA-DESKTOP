@@ -18,6 +18,10 @@ pub fn get_db() -> &'static PgPool {
     DB_POOL.get().expect("Database pool not initialized")
 }
 
+pub async fn run_migrations() -> Result<(), sqlx::migrate::MigrateError> {
+    sqlx::migrate!("../migrations").run(get_db()).await
+}
+
 pub fn init_redis(redis_url: &str) -> Result<(), redis::RedisError> {
     let client = RedisClient::open(redis_url)?;
     REDIS_CLIENT.set(client).ok();

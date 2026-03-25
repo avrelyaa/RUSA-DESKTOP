@@ -17,6 +17,9 @@ pub fn run() {
                     .unwrap_or_else(|_| "redis://127.0.0.1/".to_string());
 
                 db::init_db(&database_url).await.expect("Failed to init DB");
+                db::run_migrations()
+                    .await
+                    .expect("Failed to run DB migrations");
                 db::init_redis(&redis_url).expect("Failed to init Redis");
             });
             Ok(())
@@ -65,6 +68,9 @@ pub fn run() {
             commands::data_commands::analyst_submit_response,
             commands::data_commands::analyst_reject_request,
             commands::data_commands::deliver_data_response,
+            commands::data_commands::acknowledge_data_response,
+            commands::data_commands::list_data_response_attachments,
+            commands::data_commands::download_data_response_attachment,
             // security
             commands::security_commands::create_incident_report,
             commands::security_commands::get_incident_reports,

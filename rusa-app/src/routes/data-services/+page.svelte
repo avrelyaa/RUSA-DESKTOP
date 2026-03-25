@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import MarkdownOutput from '$lib/components/MarkdownOutput.svelte';
   import { session } from '$lib/stores/auth';
   import { dataApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -15,8 +16,14 @@
 
   // New request form
   let title = $state('');
-  let description = $state('');
   let dataType = $state('');
+  let additionalContext = $state('');
+  let requesterLocation = $state('');
+  let requesterTelFax = $state('N/A');
+  let requesterDepartment = $state('');
+  let requesterDepartmentEmail = $state('');
+  let requestedItems = $state<string[]>(['']);
+  let reasonOfRequest = $state('');
 
   // Statistician review
   let reviewOpen = $state(false);
@@ -39,13 +46,16 @@
   // Submit results
   let submitOpen = $state(false);
   let submitReq: any = $state(null);
-  let responseData = $state('');
+  let responseMarkdown = $state('');
+  let responseStatus = $state<'provided' | 'rejected'>('provided');
+  let responseExplanation = $state('');
   let analystNotes = $state('');
+  let providedBy = $state<string[]>([]);
+  let selectedFiles = $state<File[]>([]);
 
-  // Analyst rejection
-  let rejectOpen = $state(false);
-  let rejectReq: any = $state(null);
-  let rejectionReason = $state('');
+  let attachmentsOpen = $state(false);
+  let attachmentsReq: any = $state(null);
+  let attachments = $state<any[]>([]);
 
   const role = $derived($session?.role_name ?? '');
 
@@ -63,6 +73,13 @@
       requests = await dataApi.getRequests(s.token);
       if (role === 'the_statistician') {
         allUsers = await userApi.getAll(s.token);
+      } else if (role !== 'data_analyst') {
+        requesterLocation = s.location ?? '';
+        requesterTelFax = s.tel_fax ?? 'N/A';
+        requesterDepartment = s.department ?? s.role_display_name ?? '';
+        requesterDepartmentEmail = s.department_email ?? s.email ?? '';
+      } else {
+        allUsers = await userApi.getAll(s.token);
       }
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
@@ -75,13 +92,45 @@
 
   async function create() {
     const s = $session; if (!s) return;
-    if (!title || !description) { showToast('Title and description required', 'error'); return; }
+    const items = requestedItems.map(i => i.trim()).filter(Boolean);
+    if (!title.trim()) { showToast('Title required', 'error'); return; }
+    if (!items.length) { showToast('Requested data must be itemized', 'error'); return; }
+    if (!reasonOfRequest.trim()) { showToast('Reason of request required', 'error'); return; }
+    if (!requesterLocation.trim()) { showToast('Location required', 'error'); return; }
+    if (!requesterTelFax.trim()) { showToast('Tel/Fax required', 'error'); return; }
+    if (!requesterDepartment.trim()) { showToast('Department required', 'error'); return; }
+    if (!requesterDepartmentEmail.trim()) { showToast('Department email required', 'error'); return; }
+    const requestedDataItems = items.map(i => `- ${i}`).join('\n');
     try {
-      await dataApi.submitRequest(s.token, title, description, dataType || undefined);
+      await dataApi.submitRequest(s.token, {
+        title,
+        requestedDataItems,
+        reasonOfRequest,
+        description: additionalContext.trim() || undefined,
+        dataType: dataType || undefined,
+        requesterLocation,
+        requesterTelFax,
+        requesterDepartment,
+        requesterDepartmentEmail
+      });
       showToast('Request submitted', 'success');
-      createOpen = false; title = ''; description = ''; dataType = '';
+      createOpen = false;
+      title = '';
+      dataType = '';
+      additionalContext = '';
+      requestedItems = [''];
+      reasonOfRequest = '';
       await reload();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function addRequestedItem() {
+    requestedItems = [...requestedItems, ''];
+  }
+
+  function removeRequestedItem(i: number) {
+    if (requestedItems.length <= 1) return;
+    requestedItems = requestedItems.filter((_, idx) => idx !== i);
   }
 
   function openReview(req: any) {
@@ -115,39 +164,90 @@
   }
 
   function openSubmit(req: any) {
-    submitReq = req; responseData = ''; analystNotes = '';
+    const s = $session;
+    submitReq = req;
+    responseMarkdown = '';
+    responseStatus = 'provided';
+    responseExplanation = '';
+    analystNotes = '';
+    providedBy = s ? [s.user_id] : [];
+    selectedFiles = [];
     submitOpen = true;
   }
 
   function openSubmitWithData(req: any, data: string) {
-    submitReq = req; responseData = data; analystNotes = '';
+    const s = $session;
+    submitReq = req;
+    responseMarkdown = data;
+    responseStatus = 'provided';
+    responseExplanation = '';
+    analystNotes = '';
+    providedBy = s ? [s.user_id] : [];
+    selectedFiles = [];
     analyzeOpen = false;
     submitOpen = true;
   }
 
+  function openRejectAsResponse(req: any) {
+    const s = $session;
+    submitReq = req;
+    responseMarkdown = '';
+    responseStatus = 'rejected';
+    responseExplanation = '';
+    analystNotes = '';
+    providedBy = s ? [s.user_id] : [];
+    selectedFiles = [];
+    submitOpen = true;
+  }
+
+  function toggleProvidedBy(id: string) {
+    if (providedBy.includes(id)) providedBy = providedBy.filter(x => x !== id);
+    else providedBy = [...providedBy, id];
+  }
+
+  function onFilesSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = input.files ? Array.from(input.files) : [];
+    selectedFiles = files;
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = reader.result;
+        if (typeof res !== 'string') return reject(new Error('Invalid file encoding'));
+        const idx = res.indexOf(',');
+        resolve(idx >= 0 ? res.slice(idx + 1) : res);
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function doAnalystSubmit() {
     const s = $session; if (!s || !submitReq) return;
-    if (!responseData) { showToast('Response data required', 'error'); return; }
+    if (!providedBy.length) { showToast('Provided By is required', 'error'); return; }
+    if (responseStatus === 'provided' && !responseMarkdown.trim()) { showToast('Provided data output required', 'error'); return; }
+    if (responseStatus === 'rejected' && !responseExplanation.trim()) { showToast('Explanation required for rejected responses', 'error'); return; }
     try {
-      await dataApi.analystSubmit(s.token, submitReq.id, responseData, analystNotes || undefined);
+      const attachments = await Promise.all(selectedFiles.map(async f => ({
+        filename: f.name,
+        mimeType: f.type || null,
+        base64: await fileToBase64(f)
+      })));
+
+      await dataApi.analystSubmit(s.token, {
+        requestId: submitReq.id,
+        responseMarkdown,
+        responseStatus,
+        responseExplanation: responseStatus === 'rejected' ? responseExplanation : undefined,
+        analystNotes: analystNotes || undefined,
+        providedBy,
+        attachments
+      });
       showToast('Submitted to Statistician', 'success');
       submitOpen = false;
-      await reload();
-    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
-  }
-
-  function openReject(req: any) {
-    rejectReq = req; rejectionReason = '';
-    rejectOpen = true;
-  }
-
-  async function doAnalystReject() {
-    const s = $session; if (!s || !rejectReq) return;
-    if (!rejectionReason.trim()) { showToast('Rejection reason required', 'error'); return; }
-    try {
-      await dataApi.analystReject(s.token, rejectReq.id, rejectionReason);
-      showToast('Request rejected', 'success');
-      rejectOpen = false;
       await reload();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -158,6 +258,47 @@
       await dataApi.deliver(s.token, req.id);
       showToast('Delivered to requester', 'success');
       await reload();
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function acknowledge(req: any) {
+    const s = $session; if (!s) return;
+    try {
+      await dataApi.acknowledge(s.token, req.id);
+      showToast('Acknowledged', 'success');
+      await reload();
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function openAttachments(req: any) {
+    const s = $session; if (!s) return;
+    try {
+      attachmentsReq = req;
+      attachments = await dataApi.listAttachments(s.token, req.id);
+      attachmentsOpen = true;
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function downloadFromBase64(filename: string, mimeType: string | null, base64: string) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mimeType || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadAttachment(attachmentId: string) {
+    const s = $session; if (!s) return;
+    try {
+      const file = await dataApi.downloadAttachment(s.token, attachmentId);
+      downloadFromBase64(file.filename, file.mime_type ?? null, file.base64);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -298,6 +439,20 @@
     };
     return map[s] || '';
   };
+
+  const formatProvidedBy = (req: any) => {
+    const raw = req?.provided_by_names;
+    if (!raw) return '—';
+    if (Array.isArray(raw) && raw.length) return raw.join(', ');
+    if (typeof raw !== 'string') return '—';
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.join(', ');
+      return '—';
+    } catch {
+      return '—';
+    }
+  };
 </script>
 
 <svelte:head><title>RUSA IMS — Data Services</title></svelte:head>
@@ -351,8 +506,17 @@
         <div class="req-card">
           <div class="req-info">
             <span class="req-title">{req.title}</span>
-            <span class="req-meta">Analyst notes: {req.analyst_notes || '—'}</span>
-            <span class="req-desc response-preview">{req.response_data || '—'}</span>
+            <span class="req-meta">Request ID: {req.id}</span>
+            <span class="req-meta">Date of response: {req.response_submitted_at ? new Date(req.response_submitted_at).toLocaleDateString() : '—'}</span>
+            <span class="req-meta">Status: {req.response_status ? req.response_status.toUpperCase() : '—'}</span>
+            <span class="req-meta">Provided by: {formatProvidedBy(req)}</span>
+            {#if req.response_status === 'rejected'}
+              <span class="req-meta">Explanation: {req.response_explanation || '—'}</span>
+            {/if}
+            <MarkdownOutput markdown={req.response_markdown || req.response_data || ''} />
+            <div class="req-actions" style="margin-top:0.5rem">
+              <button class="btn-secondary" onclick={() => openAttachments(req)}>Attachments</button>
+            </div>
           </div>
           <div class="req-actions">
             <button class="btn-primary" onclick={() => deliver(req)}>Deliver to Requester</button>
@@ -398,7 +562,7 @@
             {/if}
             <button class="btn-analyze" onclick={() => { activeRequest = req; activeTab = 'analyze'; }}>Analyze</button>
             <button class="btn-primary" onclick={() => openSubmit(req)}>Submit Results</button>
-            <button class="btn-danger" onclick={() => openReject(req)}>Reject</button>
+            <button class="btn-danger" onclick={() => openRejectAsResponse(req)}>Reject</button>
           </div>
         </div>
       {/each}
@@ -505,8 +669,23 @@
             <span class="req-title">{req.title}</span>
             <span class={`status-badge ${statusBadge(req.status)}`}>{req.status}</span>
             <span class="req-meta">{req.data_type || ''} · {req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}</span>
-            {#if req.response_data}
-              <span class="req-desc">Response: {req.response_data}</span>
+            {#if req.status === 'delivered'}
+              <span class="req-meta">Date of response: {req.response_submitted_at ? new Date(req.response_submitted_at).toLocaleDateString() : '—'}</span>
+              <span class="req-meta">Response status: {req.response_status ? req.response_status.toUpperCase() : '—'}</span>
+              <span class="req-meta">Provided by: {formatProvidedBy(req)}</span>
+              <span class="req-meta">Final review: {req.delivered_at ? new Date(req.delivered_at).toLocaleDateString() : '—'}</span>
+              {#if req.response_status === 'rejected'}
+                <span class="req-meta">Explanation: {req.response_explanation || '—'}</span>
+              {/if}
+              <MarkdownOutput markdown={req.response_markdown || req.response_data || ''} />
+              <div class="req-actions" style="margin-top:0.5rem">
+                <button class="btn-secondary" onclick={() => openAttachments(req)}>Attachments</button>
+                {#if !req.requester_acknowledged_at}
+                  <button class="btn-primary" onclick={() => acknowledge(req)}>Acknowledge Receipt</button>
+                {:else}
+                  <span class="req-meta">Acknowledged: {new Date(req.requester_acknowledged_at).toLocaleDateString()}</span>
+                {/if}
+              </div>
             {/if}
           </div>
         </div>
@@ -519,9 +698,33 @@
 <!-- New Request Modal -->
 <Modal bind:open={createOpen} title="Submit Data Request">
   <div class="form">
+    <Field label="Location" bind:value={requesterLocation} required />
+    <Field label="Tel/Fax" bind:value={requesterTelFax} required />
+    <Field label="Department" bind:value={requesterDepartment} required />
+    <Field label="Department Email" bind:value={requesterDepartmentEmail} required />
+
+    <Field label="Date" value={new Date().toLocaleDateString()} disabled />
     <Field label="Title" bind:value={title} required />
-    <Field label="Description" type="textarea" bind:value={description} required />
     <Field label="Data Type" bind:value={dataType} placeholder="e.g. telemetry, environmental" />
+
+    <div class="items">
+      <div class="items-head">
+        <div class="items-title">Requested Data (Itemized)<span class="required">*</span></div>
+        <button class="btn-secondary" type="button" onclick={addRequestedItem}>+ Add Item</button>
+      </div>
+      {#each requestedItems as item, i}
+        <div class="item-row">
+          <input class="item-input" bind:value={requestedItems[i]} placeholder="e.g. Ship data, Time logs, Participants" />
+          <button class="btn-danger" type="button" onclick={() => removeRequestedItem(i)} disabled={requestedItems.length<=1}>Remove</button>
+        </div>
+      {/each}
+    </div>
+
+    <Field label="Reason of Request" type="textarea" bind:value={reasonOfRequest} required />
+    <Field label="Additional Context" type="textarea" bind:value={additionalContext} />
+
+    <Field label="Requested By" value={$session?.full_name ?? ''} disabled />
+    <Field label="Signature" value={$session?.full_name ?? ''} disabled />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => createOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={create}>Submit</button>
@@ -559,7 +762,45 @@
   <div class="form">
     <p class="req-meta">Status: <strong>{submitReq?.status}</strong></p>
     <p class="req-desc">{submitReq?.description || ''}</p>
-    <Field label="Response Data / Results" type="textarea" bind:value={responseData} rows={6} required />
+    <Field
+      label="Response Status"
+      type="select"
+      bind:value={responseStatus}
+      options={[
+        { value: 'provided', label: 'PROVIDED' },
+        { value: 'rejected', label: 'REJECTED' }
+      ]}
+      required
+    />
+    {#if responseStatus === 'rejected'}
+      <Field label="Explanation" type="textarea" bind:value={responseExplanation} rows={4} required />
+    {/if}
+    <Field label="Provided Data Output (Markdown supported)" type="textarea" bind:value={responseMarkdown} rows={10} required={responseStatus==='provided'} />
+
+    <div class="field">
+      <label class="field-label">Attachments</label>
+      <input class="field-input" type="file" multiple onchange={onFilesSelected} />
+      {#if selectedFiles.length}
+        <div class="file-list">
+          {#each selectedFiles as f}
+            <div class="file-row">{f.name}</div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
+    <div class="field">
+      <label class="field-label">Provided By<span class="required">*</span></label>
+      <div class="checkboxes">
+        {#each analystUsers as u}
+          <label class="check">
+            <input type="checkbox" checked={providedBy.includes(u.id)} onchange={() => toggleProvidedBy(u.id)} />
+            <span>{u.full_name || u.username}</span>
+          </label>
+        {/each}
+      </div>
+    </div>
+
     <Field label="Analyst Notes" type="textarea" bind:value={analystNotes} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => submitOpen = false}>Cancel</button>
@@ -568,15 +809,21 @@
   </div>
 </Modal>
 
-<!-- Analyst Reject Modal -->
-<Modal bind:open={rejectOpen} title="Reject Request: {rejectReq?.title}">
+<!-- Attachments Modal -->
+<Modal bind:open={attachmentsOpen} title="Attachments: {attachmentsReq?.title}">
   <div class="form">
-    <p class="req-meta">Status: <strong>{rejectReq?.status}</strong></p>
-    <p class="req-desc">{rejectReq?.description || ''}</p>
-    <Field label="Rejection Reason" type="textarea" bind:value={rejectionReason} required />
+    {#if attachments.length === 0}
+      <p class="empty">No attachments</p>
+    {:else}
+      {#each attachments as a}
+        <div class="att-row">
+          <span class="att-name">{a.filename}</span>
+          <button class="btn-secondary" onclick={() => downloadAttachment(a.id)}>Download</button>
+        </div>
+      {/each}
+    {/if}
     <div class="form-actions">
-      <button class="btn-secondary" onclick={() => rejectOpen = false}>Cancel</button>
-      <button class="btn-danger" onclick={doAnalystReject}>Reject Request</button>
+      <button class="btn-secondary" onclick={() => attachmentsOpen = false}>Close</button>
     </div>
   </div>
 </Modal>
@@ -617,6 +864,20 @@
   .btn-approve { background: none; border: 1px solid #00c864; border-radius: 4px; color: #00c864; cursor: pointer; font-size: 0.82rem; padding: 0.5rem 1rem; white-space: nowrap; }
   .btn-danger { background: none; border: 1px solid #ff4466; border-radius: 4px; color: #ff4466; cursor: pointer; font-size: 0.82rem; padding: 0.5rem 1rem; white-space: nowrap; }
   .btn-analyze { background: none; border: 1px solid #b482ff; border-radius: 4px; color: #b482ff; cursor: pointer; font-size: 0.82rem; padding: 0.5rem 1rem; white-space: nowrap; }
+  .items { display: flex; flex-direction: column; gap: 0.75rem; }
+  .items-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+  .items-title { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .required { color: #ff4466; margin-left: 2px; }
+  .item-row { display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center; }
+  .item-input { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.625rem 0.875rem; width: 100%; box-sizing: border-box; }
+  .item-input:focus { outline: none; border-color: #3d7fff; }
+  .file-list { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .file-row { font-size: 0.82rem; color: #8fa3cc; }
+  .checkboxes { display: flex; flex-direction: column; gap: 0.5rem; }
+  .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #8fa3cc; }
+  .att-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid #0d1528; }
+  .att-row:last-child { border-bottom: none; }
+  .att-name { color: #e8eeff; font-size: 0.9rem; }
   .analysis-workspace { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; }
   .analysis-left { display: flex; flex-direction: column; gap: 0.75rem; }
   .data-input { font-family: 'Space Mono', monospace; font-size: 0.8rem; resize: vertical; }

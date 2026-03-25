@@ -68,19 +68,63 @@ export const researchApi = {
 
 // Data Services
 export const dataApi = {
-  submitRequest: (token: string, title: string, description: string, dataType?: string) =>
-    invoke<string>('submit_data_request', { token, title, description, dataType }),
+  submitRequest: (token: string, payload: {
+    title: string;
+    requestedDataItems: string;
+    reasonOfRequest: string;
+    description?: string;
+    dataType?: string;
+    requesterLocation: string;
+    requesterTelFax: string;
+    requesterDepartment: string;
+    requesterDepartmentEmail: string;
+  }) =>
+    invoke<string>('submit_data_request', {
+      token,
+      title: payload.title,
+      requested_data_items: payload.requestedDataItems,
+      reason_of_request: payload.reasonOfRequest,
+      description: payload.description,
+      data_type: payload.dataType,
+      requester_location: payload.requesterLocation,
+      requester_tel_fax: payload.requesterTelFax,
+      requester_department: payload.requesterDepartment,
+      requester_department_email: payload.requesterDepartmentEmail
+    }),
   getRequests: (token: string) => invoke<any[]>('get_data_requests', { token }),
   review: (token: string, requestId: string, status: string, notes?: string, assignedTo?: string) =>
     invoke<void>('review_data_request', { token, requestId, status, notes, assignedTo }),
   startProcessing: (token: string, requestId: string) =>
     invoke<void>('start_processing', { token, requestId }),
-  analystSubmit: (token: string, requestId: string, responseData: string, analystNotes?: string) =>
-    invoke<void>('analyst_submit_response', { token, requestId, responseData, analystNotes }),
+  analystSubmit: (token: string, payload: {
+    requestId: string;
+    responseMarkdown: string;
+    responseStatus: 'provided' | 'rejected';
+    responseExplanation?: string;
+    analystNotes?: string;
+    providedBy: string[];
+    attachments: Array<{ filename: string; mimeType: string | null; base64: string }>;
+  }) =>
+    invoke<void>('analyst_submit_response', {
+      token,
+      request_id: payload.requestId,
+      response_markdown: payload.responseMarkdown,
+      response_status: payload.responseStatus,
+      response_explanation: payload.responseExplanation,
+      analyst_notes: payload.analystNotes,
+      provided_by: payload.providedBy,
+      attachments: payload.attachments.map(a => ({ filename: a.filename, mime_type: a.mimeType, base64: a.base64 }))
+    }),
   analystReject: (token: string, requestId: string, rejectionReason: string) =>
     invoke<void>('analyst_reject_request', { token, requestId, rejectionReason }),
   deliver: (token: string, requestId: string) =>
     invoke<void>('deliver_data_response', { token, requestId }),
+  acknowledge: (token: string, requestId: string) =>
+    invoke<void>('acknowledge_data_response', { token, request_id: requestId }),
+  listAttachments: (token: string, requestId: string) =>
+    invoke<any[]>('list_data_response_attachments', { token, request_id: requestId }),
+  downloadAttachment: (token: string, attachmentId: string) =>
+    invoke<any>('download_data_response_attachment', { token, attachment_id: attachmentId }),
 };
 
 // Security
@@ -242,10 +286,6 @@ export const medicalApi = {
   addSpecialization: (token: string, staffId: string, specialization: string, certifiedAt?: string) =>
     invoke<string>('add_specialization', { token, staffId, specialization, certifiedAt }),
   getSpecializations: (token: string) => invoke<any[]>('get_staff_specializations', { token }),
-  submitBudget: (token: string, title: string, description: string, amount: number, items?: string) =>
-    invoke<string>('submit_budget_request', { token, title, description, amount, items }),
-  submitExpenditure: (token: string, title: string, description: string, totalAmount: number, items?: string, invoiceData?: string) =>
-    invoke<string>('submit_expenditure_report', { token, title, description, totalAmount, items, invoiceData }),
   assignTask: (token: string, assignedTo: string, title: string, description?: string, dueDate?: string) =>
     invoke<string>('assign_medical_task', { token, assignedTo, title, description, dueDate }),
   getTasks: (token: string) => invoke<any[]>('get_medical_tasks', { token }),
@@ -318,11 +358,15 @@ export const governanceApi = {
 // Budget
 export const budgetApi = {
   getBudgetRequests: (token: string) => invoke<any[]>('get_budget_requests', { token }),
+  submitBudgetRequest: (token: string, title: string, description: string, amount: number, items?: string) =>
+    invoke<string>('submit_budget_request', { token, title, description, amount, items }),
   reviewBudget: (token: string, requestId: string, status: string, notes?: string) =>
     invoke<void>('review_budget_request', { token, requestId, status, notes }),
   flagBudget: (token: string, requestId: string, reason: string) =>
     invoke<void>('flag_budget_request', { token, requestId, reason }),
   getExpenditures: (token: string) => invoke<any[]>('get_expenditure_reports', { token }),
+  submitExpenditureReport: (token: string, title: string, description: string, totalAmount: number, items?: string, invoiceData?: string) =>
+    invoke<string>('submit_expenditure_report', { token, title, description, totalAmount, items, invoiceData }),
   flagExpenditure: (token: string, reportId: string, reason: string) =>
     invoke<void>('flag_expenditure_report', { token, reportId, reason }),
   submitInvestigation: (token: string, title: string, description: string, relatedReportId?: string) =>
@@ -387,10 +431,15 @@ export interface SessionData {
   user_id: string;
   username: string;
   full_name: string;
+  email: string;
   role_name: string;
   role_display_name: string;
   tier: number;
   subsystem: string | null;
+  location: string | null;
+  tel_fax: string | null;
+  department: string | null;
+  department_email: string | null;
   token: string;
   /** Role names that this user's role inherits permissions from. */
   inherited_permissions: string[];

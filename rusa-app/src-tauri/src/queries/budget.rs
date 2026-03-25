@@ -7,7 +7,7 @@ pub struct BudgetRequestRow {
     pub title: String,
     pub description: Option<String>,
     pub amount: Option<rust_decimal::Decimal>,
-    pub items: Option<String>,
+    pub items: Option<serde_json::Value>,
     pub status: Option<String>,
     pub requested_by: Option<Uuid>,
     pub accountant_notes: Option<String>,
@@ -21,7 +21,7 @@ pub struct ExpenditureReportRow {
     pub title: String,
     pub description: Option<String>,
     pub total_amount: Option<rust_decimal::Decimal>,
-    pub items: Option<String>,
+    pub items: Option<serde_json::Value>,
     pub invoice_data: Option<String>,
     pub status: Option<String>,
     pub reported_by: Option<Uuid>,
@@ -44,7 +44,7 @@ pub async fn insert_budget_request(
     title: &str,
     description: &str,
     amount: rust_decimal::Decimal,
-    items: Option<&str>,
+    items: Option<serde_json::Value>,
     requested_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
@@ -64,7 +64,7 @@ pub async fn insert_expenditure_report(
     title: &str,
     description: &str,
     total_amount: rust_decimal::Decimal,
-    items: Option<&str>,
+    items: Option<serde_json::Value>,
     invoice_data: Option<&str>,
     reported_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {

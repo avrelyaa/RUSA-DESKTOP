@@ -4,7 +4,7 @@
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
   import { session } from '$lib/stores/auth';
-  import { budgetApi } from '$lib/api';
+  import { budgetApi, governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
@@ -19,6 +19,7 @@
   const tier = $derived($session?.tier ?? 0);
   const isAccountant = $derived(role === 'the_accountant');
   const canInitiateVote = $derived(isAccountant || tier >= 3);
+  const canSubmitRequests = $derived(tier >= 2 && !isAccountant);
 
   // Review modals
   let reviewOpen = $state(false);
@@ -28,6 +29,21 @@
   let reviewNotes = $state('');
   let flagReason = $state('');
   let flagOpen = $state(false);
+
+  // Budget Request Form
+  let budgetReqOpen = $state(false);
+  let budgetTitle = $state('');
+  let budgetDesc = $state('');
+  let budgetAmount = $state('');
+  let budgetItems = $state('');
+
+  // Expenditure Report Form
+  let expReportOpen = $state(false);
+  let expTitle = $state('');
+  let expDesc = $state('');
+  let expAmount = $state('');
+  let expItems = $state('');
+  let expInvoiceFile: FileList | null = $state(null);
 
   // Investigation form
   let invOpen = $state(false);
@@ -89,13 +105,73 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  async function submitBudgetReq() {
+    const s = $session; if (!s) return;
+    if (!budgetTitle || !budgetDesc || !budgetAmount || !budgetItems) { showToast('All fields required', 'error'); return; }
+    try {
+      const reqId = await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, Number(budgetAmount), budgetItems);
+      // Auto-route to Directors' Voting System
+      await budgetApi.initiateBudgetVote(s.token, reqId);
+      showToast('Budget request submitted and routed to Directors\' Vote', 'success');
+      budgetReqOpen = false; budgetTitle = ''; budgetDesc = ''; budgetAmount = ''; budgetItems = '';
+      requests = await budgetApi.getBudgetRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitExpReport() {
+    const s = $session; if (!s) return;
+    if (!expTitle || !expDesc || !expAmount || !expItems || !expInvoiceFile || expInvoiceFile.length === 0) { 
+      showToast('All fields including invoice upload are required', 'error'); return; 
+    }
+    try {
+      // Dummy processing for invoice file upload
+      const invoiceData = `Uploaded: ${expInvoiceFile[0].name}`;
+      await budgetApi.submitExpenditureReport(s.token, expTitle, expDesc, Number(expAmount), expItems, invoiceData);
+      showToast('Expenditure report submitted to The Accountant', 'success');
+      expReportOpen = false; expTitle = ''; expDesc = ''; expAmount = ''; expItems = ''; expInvoiceFile = null;
+      expenditures = await budgetApi.getExpenditures(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   async function submitInvestigation() {
     const s = $session; if (!s) return;
     if (!invTitle || !invDesc) { showToast('Title and description required', 'error'); return; }
     try {
-      await budgetApi.submitInvestigation(s.token, invTitle, invDesc, invRelated || undefined);
-      showToast('Investigation submitted', 'success');
+      // Mark the report as flagged/under investigation
+      if (invRelated) {
+        await budgetApi.flagExpenditure(s.token, invRelated, invDesc);
+      }
+
+      const invId = await budgetApi.submitInvestigation(s.token, invTitle, invDesc, invRelated || undefined);
+      
+      // Auto-initiate meeting with Directors and involved party
+      if (invRelated) {
+        // Find the involved party
+        const report = expenditures.find(e => e.id === invRelated);
+        if (report && report.reported_by) {
+          const allUsers = await userApi.getAll(s.token);
+          const directors = allUsers.filter(u => u.tier >= 3);
+          const directorIds = directors.map(d => d.id);
+          const attendeeIds = [...new Set([...directorIds, report.reported_by])];
+          
+          await governanceApi.createMeeting(
+            s.token,
+            `Investigation Meeting: ${invTitle}`,
+            `Automated meeting for investigation ${invId}. \nDescription: ${invDesc}`,
+            undefined, // scheduledAt
+            'Virtual Boardroom',
+            attendeeIds
+          );
+          showToast('Investigation submitted, report marked, and Meeting initiated', 'success');
+        } else {
+          showToast('Investigation submitted and report marked', 'success');
+        }
+      } else {
+        showToast('Investigation submitted', 'success');
+      }
+      
       invOpen = false; invTitle = ''; invDesc = ''; invRelated = '';
+      expenditures = await budgetApi.getExpenditures(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -120,7 +196,15 @@
       <button class="tab" class:active={activeTab==='requests'} onclick={() => activeTab='requests'}>Budget Requests</button>
       <button class="tab" class:active={activeTab==='expenditures'} onclick={() => activeTab='expenditures'}>Expenditure Reports</button>
     </div>
-    <button class="btn-warning" onclick={() => invOpen = true}>+ Submit Investigation</button>
+    <div class="actions">
+      {#if canSubmitRequests}
+        {#if activeTab === 'requests'}
+          <button class="btn-primary" onclick={() => budgetReqOpen = true}>+ Submit Budget Request</button>
+        {:else if activeTab === 'expenditures'}
+          <button class="btn-primary" onclick={() => expReportOpen = true}>+ Submit Expenditure Report</button>
+        {/if}
+      {/if}
+    </div>
   </div>
 
   {#if loading}
@@ -190,6 +274,9 @@
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
     <div class="form-actions">
+      {#if isAccountant && reviewType === 'expenditure'}
+        <button class="btn-warning" onclick={() => { reviewOpen = false; invRelated = selectedItem.id; invOpen = true; }}>Submit Investigation</button>
+      {/if}
       <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
       <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitReview}>Submit Review</button>
@@ -211,10 +298,42 @@
   <div class="form">
     <Field label="Title" bind:value={invTitle} required />
     <Field label="Description" type="textarea" bind:value={invDesc} required rows={4} />
-    <Field label="Related Report ID (optional)" bind:value={invRelated} />
+    <Field label="Related Report ID (optional)" bind:value={invRelated} disabled />
+    <p class="info-text">Submitting this will mark the report and automatically initiate a Meeting invite to The Directors and involved parties.</p>
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => invOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitInvestigation}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={budgetReqOpen} title="Submit Budget Request">
+  <div class="form">
+    <Field label="Request Title" bind:value={budgetTitle} required />
+    <Field label="Description" type="textarea" bind:value={budgetDesc} required rows={3} />
+    <Field label="Total Amount" type="number" bind:value={budgetAmount} required />
+    <Field label="Itemized List" type="textarea" bind:value={budgetItems} required rows={5} hint="Please provide an itemized and descriptive list of requested funds." />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => budgetReqOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitBudgetReq}>Submit Request</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={expReportOpen} title="Submit Expenditure Report">
+  <div class="form">
+    <Field label="Report Title" bind:value={expTitle} required />
+    <Field label="Description" type="textarea" bind:value={expDesc} required rows={3} />
+    <Field label="Total Amount Spent" type="number" bind:value={expAmount} required />
+    <Field label="Itemized Descriptions" type="textarea" bind:value={expItems} required rows={5} hint="Please provide itemized descriptions of how approved funds were spent." />
+    <div class="field">
+      <label class="field-label" for="invoice-upload">Invoice Attachment <span class="required">*</span></label>
+      <input type="file" id="invoice-upload" class="field-input" bind:files={expInvoiceFile} required />
+      <span class="field-hint">A mandatory file upload/attachment field for an Invoice.</span>
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => expReportOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitExpReport}>Submit Report</button>
     </div>
   </div>
 </Modal>
@@ -255,4 +374,11 @@
   .btn-warning-sm { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.75rem; padding: 0.4rem 0.75rem; }
   .btn-vote { background: rgba(255,200,0,0.1); border: 1px solid rgba(255,200,0,0.4); border-radius: 4px; color: #ffc800; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.05em; padding: 0.4rem 0.75rem; text-transform: uppercase; }
   .btn-vote:hover { background: rgba(255,200,0,0.15); }
+  
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .required { color: #ff4466; margin-left: 2px; }
+  .field-input { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-family: 'Outfit', sans-serif; font-size: 0.9rem; padding: 0.625rem 0.875rem; transition: border-color 0.15s; width: 100%; box-sizing: border-box; }
+  .field-input:focus { outline: none; border-color: #3d7fff; box-shadow: 0 0 0 2px rgba(61,127,255,0.15); }
+  .field-hint { font-size: 0.75rem; color: #4a5d82; }
 </style>

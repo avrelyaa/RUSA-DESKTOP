@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import Table from '$lib/components/Table.svelte';
   import Field from '$lib/components/Field.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { stationApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -39,9 +40,9 @@
   let findDesc = $state('');
   let findPrivate = $state(false);
 
-  // Personnel event form
+  // Personnel form
   let personnelOpen = $state(false);
-  let personnelUserId = $state('');
+  let personnelUserSelected: any = $state(null);
   let personnelEventType = $state('');
   let personnelNotes = $state('');
 
@@ -135,11 +136,11 @@
 
   async function logPersonnelEvent() {
     const s = $session; if (!s || !selectedStation) return;
-    if (!personnelUserId || !personnelEventType) { showToast('User and event type required', 'error'); return; }
+    if (!personnelUserSelected || !personnelEventType) { showToast('Personnel and event type required', 'error'); return; }
     try {
-      await stationApi.logPersonnelEvent(s.token, selectedStation, personnelUserId, personnelEventType, personnelNotes || undefined);
-      showToast('Event logged', 'success');
-      personnelOpen = false; personnelUserId = ''; personnelEventType = ''; personnelNotes = '';
+      await stationApi.logPersonnelEvent(s.token, selectedStation, personnelUserSelected.id, personnelEventType, personnelNotes || undefined);
+      showToast('Personnel event logged', 'success');
+      personnelOpen = false; personnelUserSelected = null; personnelEventType = ''; personnelNotes = '';
       personnelLog = await stationApi.getPersonnelLog(s.token, selectedStation);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -179,8 +180,6 @@
       abandonOpen = false; abandonReason = '';
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
-
-  const userOpts = $derived(allUsers.map((u: any) => ({ value: u.id, label: u.full_name || u.username })));
 
   const invCols = [
     { key: 'category', label: 'Category' },
@@ -347,7 +346,10 @@
 
 <Modal bind:open={personnelOpen} title="Log Personnel Event">
   <div class="form">
-    <Field label="Personnel" type="select" bind:value={personnelUserId} options={userOpts} required />
+    <div class="field">
+      <label class="field-label">Personnel</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={personnelUserSelected} />
+    </div>
     <Field label="Event Type" type="select" bind:value={personnelEventType} options={personnelEventOpts} required />
     <Field label="Notes" type="textarea" bind:value={personnelNotes} />
     <div class="form-actions">

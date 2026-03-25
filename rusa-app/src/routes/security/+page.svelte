@@ -219,7 +219,6 @@
     { value: 'earth', label: 'Earth Security' },
     { value: 'galactic', label: 'Galactic Security' },
   ];
-  let userOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
 </script>
 
 <svelte:head><title>RUSA IMS — Security</title></svelte:head>

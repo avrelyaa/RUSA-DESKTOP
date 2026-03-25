@@ -12,6 +12,9 @@ struct UserAuthRow {
     full_name: String,
     role_id: Uuid,
     location: Option<String>,
+    tel_fax: Option<String>,
+    department: Option<String>,
+    department_email: Option<String>,
     is_active: Option<bool>,
     created_at: Option<chrono::DateTime<Utc>>,
     updated_at: Option<chrono::DateTime<Utc>>,
@@ -28,7 +31,8 @@ pub async fn find_user_by_username(
     let row = sqlx::query_as::<_, UserAuthRow>(
         r#"
         SELECT u.id, u.username, u.email, u.password_hash, u.full_name, u.role_id,
-               u.location, u.is_active, u.created_at, u.updated_at, u.deleted_at,
+               u.location, u.tel_fax, u.department, u.department_email,
+               u.is_active, u.created_at, u.updated_at, u.deleted_at,
                r.name as role_name, r.display_name as role_display_name, r.tier, r.subsystem
         FROM users u
         JOIN roles r ON u.role_id = r.id
@@ -47,6 +51,9 @@ pub async fn find_user_by_username(
             full_name: row.full_name,
             role_id: row.role_id,
             location: row.location,
+            tel_fax: row.tel_fax,
+            department: row.department,
+            department_email: row.department_email,
             is_active: row.is_active,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -80,7 +87,8 @@ pub async fn validate_session(token: &str) -> Result<Option<UserWithRole>, sqlx:
         r#"
         SELECT u.id, u.username, u.email, u.full_name, u.role_id,
                r.name as role_name, r.display_name as role_display_name, r.tier, r.subsystem,
-               u.location, u.is_active, u.created_at
+               u.location, u.tel_fax, u.department, u.department_email,
+               u.is_active, u.created_at
         FROM sessions s
         JOIN users u ON s.user_id = u.id
         JOIN roles r ON u.role_id = r.id

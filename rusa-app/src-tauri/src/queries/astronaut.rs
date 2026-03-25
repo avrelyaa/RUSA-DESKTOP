@@ -11,7 +11,7 @@ pub struct MissionRow {
     pub ship_id: Option<Uuid>,
     pub sector_id: Option<Uuid>,
     pub planet_id: Option<Uuid>,
-    pub start_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub start_date: Option<chrono::NaiveDate>,
     pub created_by: Option<Uuid>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -92,7 +92,7 @@ pub async fn insert_mission(
     ship_id: Option<Uuid>,
     sector_id: Option<Uuid>,
     planet_id: Option<Uuid>,
-    start_date: Option<chrono::DateTime<chrono::Utc>>,
+    start_date: Option<chrono::NaiveDate>,
     created_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(

@@ -6,7 +6,7 @@
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { canPerform } from '$lib/stores/permissions';
-  import { medicalApi, userApi } from '$lib/api';
+  import { medicalApi, userApi, budgetApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
@@ -21,7 +21,7 @@
 
   // Shift form
   let shiftOpen = $state(false);
-  let shiftStaff = $state('');
+  let shiftStaffSelected: any = $state(null);
   let shiftStart = $state('');
   let shiftEnd = $state('');
   let shiftNotes = $state('');
@@ -51,7 +51,7 @@
 
   // Specialization form
   let specOpen = $state(false);
-  let specStaff = $state('');
+  let specStaffSelected: any = $state(null);
   let specName = $state('');
   let specDate = $state('');
 
@@ -83,11 +83,11 @@
 
   async function allocateShift() {
     const s = $session; if (!s) return;
-    if (!shiftStaff || !shiftStart || !shiftEnd) { showToast('Staff ID, start, and end required', 'error'); return; }
+    if (!shiftStaffSelected || !shiftStart || !shiftEnd) { showToast('Staff User, start, and end required', 'error'); return; }
     try {
-      await medicalApi.allocateShift(s.token, shiftStaff, shiftStart, shiftEnd, shiftNotes || undefined);
+      await medicalApi.allocateShift(s.token, shiftStaffSelected.id, shiftStart, shiftEnd, shiftNotes || undefined);
       showToast('Shift allocated', 'success');
-      shiftOpen = false; shiftStaff = ''; shiftStart = ''; shiftEnd = ''; shiftNotes = '';
+      shiftOpen = false; shiftStaffSelected = null; shiftStart = ''; shiftEnd = ''; shiftNotes = '';
       shifts = await medicalApi.getShifts(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -133,11 +133,11 @@
 
   async function addSpecialization() {
     const s = $session; if (!s) return;
-    if (!specStaff || !specName) { showToast('Staff ID and specialization required', 'error'); return; }
+    if (!specStaffSelected || !specName) { showToast('Staff User and specialization required', 'error'); return; }
     try {
-      await medicalApi.addSpecialization(s.token, specStaff, specName, specDate || undefined);
+      await medicalApi.addSpecialization(s.token, specStaffSelected.id, specName, specDate || undefined);
       showToast('Specialization added', 'success');
-      specOpen = false; specStaff = ''; specName = ''; specDate = '';
+      specOpen = false; specStaffSelected = null; specName = ''; specDate = '';
       specializations = await medicalApi.getSpecializations(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -146,7 +146,7 @@
     const s = $session; if (!s) return;
     if (!budgetTitle || !budgetDesc || !budgetAmount) { showToast('Title, description, and amount required', 'error'); return; }
     try {
-      await medicalApi.submitBudget(s.token, budgetTitle, budgetDesc, budgetAmount, budgetItems || undefined);
+      await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, budgetAmount, budgetItems || undefined);
       showToast('Budget request submitted', 'success');
       budgetOpen = false; budgetTitle = ''; budgetDesc = ''; budgetAmount = 0; budgetItems = '';
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
@@ -266,7 +266,10 @@
 
 <Modal bind:open={shiftOpen} title="Allocate Shift">
   <div class="form">
-    <Field label="Staff User ID" bind:value={shiftStaff} required />
+    <div class="field">
+      <label class="field-label">Staff User</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={shiftStaffSelected} />
+    </div>
     <Field label="Shift Start" type="datetime-local" bind:value={shiftStart} required />
     <Field label="Shift End" type="datetime-local" bind:value={shiftEnd} required />
     <Field label="Notes" type="textarea" bind:value={shiftNotes} />
@@ -321,7 +324,10 @@
 
 <Modal bind:open={specOpen} title="Add Specialization">
   <div class="form">
-    <Field label="Staff User ID" bind:value={specStaff} required />
+    <div class="field">
+      <label class="field-label">Staff User</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={specStaffSelected} />
+    </div>
     <Field label="Specialization" bind:value={specName} required placeholder="e.g. Surgery, Neurology" />
     <Field label="Certification Date" type="date" bind:value={specDate} />
     <div class="form-actions">

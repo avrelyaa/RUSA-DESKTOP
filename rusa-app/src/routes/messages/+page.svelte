@@ -1,6 +1,7 @@
 <script lang="ts">
   import PageShell from '$lib/components/PageShell.svelte';
   import Modal from '$lib/components/Modal.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
   import { messageApi, userApi, researchTaskApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
@@ -38,18 +39,6 @@
   let ctDesc = $state('');
   let ctAssigneeSelected: any = $state(null);
   let ctDue = $state('');
-  let ctSourceMsgId = $state('');
-  let ctUserSearch = $state('');
-
-  let ctUserSuggestions = $derived(
-    ctUserSearch.length > 0
-      ? allUsers.filter((u: any) =>
-          u.id !== ctAssigneeSelected?.id &&
-          (u.username?.toLowerCase().includes(ctUserSearch.toLowerCase()) ||
-           u.full_name?.toLowerCase().includes(ctUserSearch.toLowerCase()))
-        ).slice(0, 8)
-      : []
-  );
 
   async function openConvertToTask(msg: any) {
     const s = $session; if (!s) return;
@@ -58,7 +47,6 @@
     ctDesc = '';
     ctAssigneeSelected = null;
     ctDue = '';
-    ctUserSearch = '';
     if (allUsers.length === 0) {
       try { allUsers = await userApi.getAll(s.token); } catch {}
     }
@@ -336,22 +324,7 @@
     </div>
     <div class="field">
       <label class="field-label" for="ct-assignee">Assign To</label>
-      <div class="recipient-tokens">
-        {#if ctAssigneeSelected}
-          <span class="token">{ctAssigneeSelected.full_name || ctAssigneeSelected.username}<button class="token-remove" onclick={() => { ctAssigneeSelected = null; ctUserSearch = ''; }}>×</button></span>
-        {:else}
-          <div class="autocomplete-wrap">
-            <input id="ct-assignee" class="field-input inline-input" bind:value={ctUserSearch} placeholder="Search user…" />
-            {#if ctUserSuggestions.length > 0}
-              <div class="suggestions">
-                {#each ctUserSuggestions as u}
-                  <button class="suggestion-item" onclick={() => { ctAssigneeSelected = u; ctUserSearch = ''; }}>{u.full_name || u.username} <span class="suggestion-role">@{u.username}</span></button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <UserAutocompleteSingle users={allUsers} bind:selected={ctAssigneeSelected} placeholder="Search user…" />
     </div>
     <div class="field">
       <label class="field-label" for="ct-due">Due Date</label>

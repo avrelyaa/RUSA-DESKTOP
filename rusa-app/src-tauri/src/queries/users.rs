@@ -7,7 +7,8 @@ pub async fn list_users() -> Result<Vec<UserWithRole>, sqlx::Error> {
         r#"
         SELECT u.id, u.username, u.email, u.full_name, u.role_id,
                r.name as role_name, r.display_name as role_display_name, r.tier, r.subsystem,
-               u.location, u.is_active, u.created_at
+               u.location, u.tel_fax, u.department, u.department_email,
+               u.is_active, u.created_at
         FROM users u
         JOIN roles r ON u.role_id = r.id
         WHERE u.deleted_at IS NULL
@@ -25,7 +26,8 @@ pub async fn get_user_by_id(user_id: Uuid) -> Result<Option<UserWithRole>, sqlx:
         r#"
         SELECT u.id, u.username, u.email, u.full_name, u.role_id,
                r.name as role_name, r.display_name as role_display_name, r.tier, r.subsystem,
-               u.location, u.is_active, u.created_at
+               u.location, u.tel_fax, u.department, u.department_email,
+               u.is_active, u.created_at
         FROM users u
         JOIN roles r ON u.role_id = r.id
         WHERE u.id = $1 AND u.deleted_at IS NULL
@@ -57,7 +59,7 @@ pub async fn create_user(
         r#"
         INSERT INTO users (username, email, password_hash, full_name, role_id, location)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, username, email, full_name, role_id, location, is_active, created_at, updated_at, deleted_at
+        RETURNING id, username, email, full_name, role_id, location, tel_fax, department, department_email, is_active, created_at, updated_at, deleted_at
         "#,
     )
     .bind(username)

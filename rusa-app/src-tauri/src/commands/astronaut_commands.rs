@@ -32,8 +32,7 @@ pub async fn create_mission(
     let secid = sector_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
     let pid = planet_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
     let sdate = start_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let id = astronaut_queries::insert_mission(
         &title,

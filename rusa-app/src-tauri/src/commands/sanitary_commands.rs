@@ -31,8 +31,7 @@ pub async fn assign_sanitary_task(
 
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let ddate = due_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let id = sanitary_queries::insert_sanitary_task(
         &title,
@@ -267,8 +266,7 @@ pub async fn create_inspection_report(
     let session = validate_session_command(&token).await?;
     require_role_name(&session, "sanitary_inspector")?;
 
-    let idate = chrono::DateTime::parse_from_rfc3339(&inspection_date)
-        .map(|d| d.with_timezone(&chrono::Utc))
+    let idate = chrono::NaiveDate::parse_from_str(&inspection_date, "%Y-%m-%d")
         .map_err(|_| "Invalid inspection_date format".to_string())?;
 
     let id = sanitary_queries::insert_inspection_report(

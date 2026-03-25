@@ -73,7 +73,7 @@
 
   // Relocation form
   let relocOpen = $state(false);
-  let rStaff = $state('');
+  let rStaffSelected: any = $state(null);
   let rLocation = $state('');
   let rType = $state('');
   let rStart = $state('');
@@ -235,11 +235,11 @@
 
   async function relocate() {
     const s = $session; if (!s) return;
-    if (!rStaff || !rLocation || !rType) { showToast('Staff, location, and type required', 'error'); return; }
+    if (!rStaffSelected || !rLocation || !rType) { showToast('Staff, location, and type required', 'error'); return; }
     try {
-      await governanceApi.relocateStaff(s.token, rStaff, rLocation, rType, rStart ? rStart + 'T00:00:00Z' : undefined, rEnd ? rEnd + 'T00:00:00Z' : undefined, rReason || undefined);
+      await governanceApi.relocateStaff(s.token, rStaffSelected.id, rLocation, rType, rStart ? rStart + 'T00:00:00Z' : undefined, rEnd ? rEnd + 'T00:00:00Z' : undefined, rReason || undefined);
       showToast('Relocation submitted', 'success');
-      relocOpen = false; rStaff = ''; rLocation = ''; rType = ''; rStart = ''; rEnd = ''; rReason = '';
+      relocOpen = false; rStaffSelected = null; rLocation = ''; rType = ''; rStart = ''; rEnd = ''; rReason = '';
       relocations = await governanceApi.getRelocations(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -395,7 +395,6 @@
   let mCcSuggestions = $derived(mCcSearch.length > 0 ? filteredMeetingRecipients(mCcSearch, [...mToSelected, ...mCcSelected]) : []);
   let mBccSuggestions = $derived(mBccSearch.length > 0 ? filteredMeetingRecipients(mBccSearch, [...mToSelected, ...mCcSelected, ...mBccSelected]) : []);
 
-  let staffOptions = $derived(allUsers.map((u: any) => ({ value: u.id, label: `${u.full_name} (${u.role_display_name || u.role_name})` })));
   let roleOptions = $derived(allRoles.map((r: any) => ({ value: r.name, label: r.display_name || r.name })));
 </script>
 
@@ -670,7 +669,10 @@
 
 <Modal bind:open={relocOpen} title="Relocate Staff">
   <div class="form">
-    <Field label="Staff Member" type="select" bind:value={rStaff} options={staffOptions} required />
+    <div class="field">
+      <label class="field-label">Staff Member</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={rStaffSelected} />
+    </div>
     <Field label="Destination" type="select" bind:value={rLocation} options={locationOptions} required />
     <Field label="Type" type="select" bind:value={rType} options={relocTypeOpts} required />
     <Field label="Start Date" type="date" bind:value={rStart} />

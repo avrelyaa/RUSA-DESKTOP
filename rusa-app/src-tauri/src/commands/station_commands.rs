@@ -64,7 +64,7 @@ struct StationSupplyRequestRow {
     id: Uuid,
     station_id: Option<Uuid>,
     title: String,
-    items: Option<String>,
+    items: Option<serde_json::Value>,
     total_cost: Option<rust_decimal::Decimal>,
     status: Option<String>,
     requested_by: Option<Uuid>,
@@ -302,11 +302,27 @@ pub async fn submit_station_supply_request(
     let cost_dec = total_cost
         .map(|v| rust_decimal::Decimal::try_from(v).map_err(|e| format!("Invalid total_cost value '{}': {}", v, e)))
         .transpose()?;
+    let items_json = items.as_deref().and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Some(v);
+        }
+        let lines = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::Value::String(l.to_string()))
+            .collect::<Vec<_>>();
+        Some(serde_json::Value::Array(lines))
+    });
 
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO station_supply_requests (station_id, title, items, total_cost, status, requested_by) VALUES ($1,$2,$3,$4,'pending',$5) RETURNING id"
     )
-    .bind(sid).bind(&title).bind(&items).bind(cost_dec).bind(session.user_id)
+    .bind(sid).bind(&title).bind(&items_json).bind(cost_dec).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;

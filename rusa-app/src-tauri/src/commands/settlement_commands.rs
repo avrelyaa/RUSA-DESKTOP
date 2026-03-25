@@ -22,7 +22,7 @@ struct SettlerTaskRow {
     assigned_to: Option<Uuid>,
     assigned_by: Option<Uuid>,
     settlement_id: Option<Uuid>,
-    due_date: Option<chrono::DateTime<chrono::Utc>>,
+    due_date: Option<chrono::NaiveDate>,
     progress_notes: Option<String>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -32,7 +32,7 @@ struct SupplyRequestRow {
     id: Uuid,
     title: String,
     description: Option<String>,
-    items: Option<String>,
+    items: Option<serde_json::Value>,
     status: Option<String>,
     settlement_id: Option<Uuid>,
     requested_by: Option<Uuid>,
@@ -110,8 +110,7 @@ pub async fn assign_settler_task(
     let atid = Uuid::parse_str(&assigned_to).map_err(|_| "Invalid user ID".to_string())?;
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
     let ddate = due_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO settler_tasks (title, description, status, assigned_to, assigned_by, settlement_id, due_date) VALUES ($1,$2,'pending',$3,$4,$5,$6) RETURNING id"
@@ -157,11 +156,27 @@ pub async fn submit_supply_request(
     require_role_name(&session, "settler_commander")?;
 
     let sid = settlement_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
+    let items_json = items.as_deref().and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            return Some(v);
+        }
+        let lines = trimmed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::Value::String(l.to_string()))
+            .collect::<Vec<_>>();
+        Some(serde_json::Value::Array(lines))
+    });
 
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO supply_requests (title, description, items, status, settlement_id, requested_by) VALUES ($1,$2,$3,'pending',$4,$5) RETURNING id"
     )
-    .bind(&title).bind(&description).bind(&items).bind(sid).bind(session.user_id)
+    .bind(&title).bind(&description).bind(&items_json).bind(sid).bind(session.user_id)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;

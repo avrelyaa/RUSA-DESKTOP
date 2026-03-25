@@ -201,11 +201,9 @@ pub async fn relocate_staff(
 
     let sid = Uuid::parse_str(&staff_id).map_err(|_| "Invalid staff ID".to_string())?;
     let sdate = start_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
     let edate = end_date.as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|d| d.with_timezone(&chrono::Utc));
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
     let id = governance_queries::insert_staff_relocation(
         sid,
