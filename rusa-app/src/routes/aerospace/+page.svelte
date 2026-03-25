@@ -531,7 +531,6 @@
   .badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
   .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
   .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
-  .badge-vote { background: rgba(156,39,176,0.15); color: #ce93d8; }
   .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
   .badge-cancelled { background: rgba(255,68,102,0.12); color: #ff4466; }
   .reports-list { display: flex; flex-direction: column; gap: 1rem; }
@@ -546,6 +545,7 @@
   .report-label { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; }
   .bypass-info-row { display: flex; align-items: center; gap: 0.5rem; }
   .vote-type-badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
+  .badge-vote,
   .vote-type-blueprint { background: rgba(156,39,176,0.15); color: #ce93d8; }
   .vote-badge { font-family: 'Space Mono', monospace; font-size: 0.65rem; }
   .vote-badge-linked { color: #ce93d8; }
