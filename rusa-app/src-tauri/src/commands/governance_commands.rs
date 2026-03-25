@@ -1,4 +1,4 @@
-use crate::auth::{require_role, require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::governance as governance_queries;
 use uuid::Uuid;
@@ -394,7 +394,7 @@ pub async fn get_nomad_tasks(token: String) -> Result<Vec<serde_json::Value>, St
 
     ensure_nomad_tasks_table().await?;
 
-    let rows = if session.role_name == "the_nomad" {
+    let rows = if permissions::has_permission(&session.role_name, "the_nomad") {
         sqlx::query_as::<_, NomadTaskRow>(
             "SELECT id, title, description, assigned_to, assigned_by, target_role, status, due_date, created_at FROM nomad_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         )

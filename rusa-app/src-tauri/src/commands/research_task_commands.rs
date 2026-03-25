@@ -1,4 +1,4 @@
-use crate::auth::validate_session_command;
+use crate::auth::{permissions, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use uuid::Uuid;
@@ -98,7 +98,10 @@ pub async fn get_research_tasks(token: String) -> Result<Vec<serde_json::Value>,
 
     ensure_research_tasks_table().await?;
 
-    let rows = if session.role_name == "the_observer" || session.role_name == "the_artificer" || session.role_name == "the_taskmaster" {
+    let rows = if permissions::has_permission(&session.role_name, "the_observer")
+        || permissions::has_permission(&session.role_name, "the_artificer")
+        || permissions::has_permission(&session.role_name, "the_taskmaster")
+    {
         sqlx::query_as::<_, ResearchTaskRow>(
             "SELECT id, title, description, assigned_to, assigned_by, source_message_id, status, result_notes, due_date, created_at FROM research_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
         )

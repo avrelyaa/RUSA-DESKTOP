@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::medical as medical_queries;
@@ -88,7 +88,7 @@ pub async fn get_psychiatry_tasks(token: String) -> Result<Vec<serde_json::Value
 
     ensure_psychiatry_tasks_table().await?;
 
-    let rows = if session.role_name == "psychiatrist" {
+    let rows = if permissions::has_permission(&session.role_name, "psychiatrist") {
         sqlx::query_as::<_, PsychiatryTaskRow>(
             "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM psychiatry_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
@@ -206,7 +206,9 @@ pub async fn schedule_appointment(
 pub async fn get_appointments(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "psychiatrist" || session.role_name == "psychiatrist_assistant" {
+    let rows = if permissions::has_permission(&session.role_name, "psychiatrist")
+        || permissions::has_permission(&session.role_name, "psychiatrist_assistant")
+    {
         medical_queries::get_all_appointments().await
     } else {
         medical_queries::get_patient_appointments(session.user_id).await

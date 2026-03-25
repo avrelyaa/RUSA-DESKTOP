@@ -392,4 +392,6 @@ export interface SessionData {
   tier: number;
   subsystem: string | null;
   token: string;
+  /** Role names that this user's role inherits permissions from. */
+  inherited_permissions: string[];
 }

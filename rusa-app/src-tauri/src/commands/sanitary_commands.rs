@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::sanitary as sanitary_queries;
 use uuid::Uuid;
@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub async fn get_sanitary_tasks(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "head_of_sanitary" {
+    let rows = if permissions::has_permission(&session.role_name, "head_of_sanitary") {
         sanitary_queries::get_all_sanitary_tasks().await
     } else {
         sanitary_queries::get_user_sanitary_tasks(session.user_id).await

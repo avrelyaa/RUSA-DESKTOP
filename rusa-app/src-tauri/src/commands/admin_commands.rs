@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::write_audit_log;
 use crate::queries::users::{create_user as query_create_user, soft_delete_user};
@@ -90,12 +90,16 @@ pub async fn terminate_personnel(
     let uid = Uuid::parse_str(&user_id).map_err(|_| "Invalid user ID".to_string())?;
 
     // anchorman can terminate non-directors; administrator can terminate anyone
-    if session.role_name != "the_administrator" && session.role_name != "the_anchorman" {
+    if !permissions::has_permission(&session.role_name, "the_administrator")
+        && !permissions::has_permission(&session.role_name, "the_anchorman")
+    {
         return Err("Only administrator or anchorman can terminate personnel".to_string());
     }
 
-    // If anchorman, ensure target is not a director (tier < 3)
-    if session.role_name == "the_anchorman" {
+    // If not administrator, ensure target is not a director (tier < 3)
+    if !permissions::has_permission(&session.role_name, "the_administrator")
+        && permissions::has_permission(&session.role_name, "the_anchorman")
+    {
         #[derive(sqlx::FromRow)]
         struct TierCheck {
             tier: i32,

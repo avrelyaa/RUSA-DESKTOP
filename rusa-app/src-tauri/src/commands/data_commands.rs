@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::data as data_queries;
 use uuid::Uuid;
@@ -34,9 +34,9 @@ pub async fn submit_data_request(
 pub async fn get_data_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "the_statistician" {
+    let rows = if permissions::has_permission(&session.role_name, "the_statistician") {
         data_queries::get_all_data_requests().await
-    } else if session.role_name == "data_analyst" {
+    } else if permissions::has_permission(&session.role_name, "data_analyst") {
         data_queries::get_analyst_data_requests().await
     } else {
         data_queries::get_user_data_requests(session.user_id).await

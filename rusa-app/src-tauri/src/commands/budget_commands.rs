@@ -1,4 +1,4 @@
-use crate::auth::{require_role_name, validate_session_command};
+use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::budget as budget_queries;
 use crate::queries::governance as governance_queries;
@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub async fn get_budget_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "the_accountant" {
+    let rows = if permissions::has_permission(&session.role_name, "the_accountant") {
         budget_queries::get_all_budget_requests().await
     } else {
         budget_queries::get_user_budget_requests(session.user_id).await
@@ -150,7 +150,7 @@ pub async fn flag_budget_request(
 pub async fn get_expenditure_reports(token: String) -> Result<Vec<serde_json::Value>, String> {
     let session = validate_session_command(&token).await?;
 
-    let rows = if session.role_name == "the_accountant" {
+    let rows = if permissions::has_permission(&session.role_name, "the_accountant") {
         budget_queries::get_all_expenditure_reports().await
     } else {
         budget_queries::get_user_expenditure_reports(session.user_id).await

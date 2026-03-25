@@ -1,3 +1,5 @@
+pub mod permissions;
+
 use crate::db;
 use crate::models::user::SessionData;
 use redis::AsyncCommands;
@@ -30,6 +32,7 @@ pub async fn validate_session_command(token: &str) -> Result<SessionData, String
         tier: user_with_role.tier,
         subsystem: user_with_role.subsystem.clone(),
         token: token.to_string(),
+        inherited_permissions: permissions::build_inherited_permissions(&user_with_role.role_name),
     };
 
     // Cache in Redis
@@ -54,11 +57,22 @@ pub fn require_role(session: &SessionData, min_tier: i32) -> Result<(), String> 
 }
 
 pub fn require_role_name(session: &SessionData, role_name: &str) -> Result<(), String> {
-    if session.role_name == role_name {
+    if permissions::has_permission(&session.role_name, role_name) {
         Ok(())
     } else {
         Err(format!("This action requires the '{}' role.", role_name))
     }
+}
+
+/// Check if the user holds `required_role` directly or via inherited permissions.
+/// Equivalent to `require_role_name` but with a more descriptive name.
+pub fn require_permission(session: &SessionData, required_role: &str) -> Result<(), String> {
+    require_role_name(session, required_role)
+}
+
+/// Returns `true` if the session belongs to `the_administrator` (tier 4).
+pub fn is_admin(session: &SessionData) -> bool {
+    session.role_name == "the_administrator" || session.tier >= 4
 }
 
 pub async fn invalidate_session_cache(token: &str) {
