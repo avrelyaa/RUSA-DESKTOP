@@ -582,7 +582,13 @@
                 <td>{ship.ship_name ?? ship.name}</td>
                 <td>{ship.ship_type ?? ship.model ?? '—'}</td>
                 <td><span class={statusBadgeClass(ship.status)}>{ship.status ?? '—'}</span></td>
-                <td>{ship.build_status ? `<span class="${statusBadgeClass(ship.build_status)}">${ship.build_status}</span>` : '—'}</td>
+                <td>
+                  {#if ship.build_status}
+                    <span class={statusBadgeClass(ship.build_status)}>{ship.build_status}</span>
+                  {:else}
+                    —
+                  {/if}
+                </td>
                 <td>{ship.capacity ?? '—'}</td>
                 <td>{ship.launch_date ? new Date(ship.launch_date).toLocaleDateString() : '—'}</td>
                 <td>{ship.last_updated ? new Date(ship.last_updated).toLocaleDateString() : '—'}</td>
