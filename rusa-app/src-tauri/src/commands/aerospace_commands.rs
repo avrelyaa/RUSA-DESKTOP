@@ -16,6 +16,47 @@ struct AerospaceTaskRow {
     progress_notes: Option<String>,
     due_date: Option<chrono::DateTime<chrono::Utc>>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_requested_by: Option<Uuid>,
+    conclusion_approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    conclusion_approved_by: Option<Uuid>,
+    final_notes: Option<String>,
+    final_findings: Option<String>,
+    methodology_summary: Option<String>,
+    key_results: Option<String>,
+    recommendations: Option<String>,
+    limitations: Option<String>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct ShipRow {
+    id: Uuid,
+    name: String,
+    ship_name: Option<String>,
+    model: Option<String>,
+    capacity: Option<i32>,
+    ship_type: Option<String>,
+    status: Option<String>,
+    build_status: Option<String>,
+    blueprint_approver: Option<Uuid>,
+    launch_date: Option<chrono::DateTime<chrono::Utc>>,
+    materials_used: Option<String>,
+    last_updated: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+struct HelpRequestRow {
+    id: Uuid,
+    requested_by: Option<Uuid>,
+    title: String,
+    description: Option<String>,
+    category: Option<String>,
+    assigned_proxy_director: String,
+    status: String,
+    response: Option<String>,
+    resolved_by: Option<Uuid>,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 async fn ensure_aerospace_tasks_table() -> Result<(), String> {
@@ -30,7 +71,17 @@ async fn ensure_aerospace_tasks_table() -> Result<(), String> {
             progress_notes TEXT,
             due_date TIMESTAMPTZ,
             created_at TIMESTAMPTZ DEFAULT NOW(),
-            deleted_at TIMESTAMPTZ
+            deleted_at TIMESTAMPTZ,
+            conclusion_requested_at TIMESTAMPTZ,
+            conclusion_requested_by UUID REFERENCES users(id),
+            conclusion_approved_at TIMESTAMPTZ,
+            conclusion_approved_by UUID REFERENCES users(id),
+            final_notes TEXT,
+            final_findings TEXT,
+            methodology_summary TEXT,
+            key_results TEXT,
+            recommendations TEXT,
+            limitations TEXT
         )"#,
     )
     .execute(db::get_db())
@@ -91,14 +142,14 @@ pub async fn get_aerospace_assigned_tasks(token: String) -> Result<Vec<serde_jso
 
     let rows = if session.tier >= 2 {
         sqlx::query_as::<_, AerospaceTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM aerospace_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE assigned_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
         .bind(session.user_id)
         .fetch_all(db::get_db())
         .await
     } else {
         sqlx::query_as::<_, AerospaceTaskRow>(
-            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at FROM aerospace_assigned_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+            "SELECT id, title, description, assigned_to, assigned_by, status, progress_notes, due_date, created_at, conclusion_requested_at, conclusion_requested_by, conclusion_approved_at, conclusion_approved_by, final_notes, final_findings, methodology_summary, key_results, recommendations, limitations FROM aerospace_assigned_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
         )
         .bind(session.user_id)
         .fetch_all(db::get_db())
@@ -462,6 +513,340 @@ pub async fn update_ship_status(
         "UPDATE_SHIP_STATUS",
         Some("ships"),
         Some(sid),
+        None,
+        Some(serde_json::json!({ "status": status })),
+    )
+    .await;
+
+    Ok(())
+}
+
+// ─── Aerospace Task Conclusion Flow ─────────────────────────────────────────
+
+/// Aerospace engineer requests conclusion of an assigned task.
+/// Bypasses voting; goes directly to the director who assigned the task.
+#[tauri::command]
+pub async fn request_aerospace_task_conclusion(
+    token: String,
+    task_id: String,
+    final_notes: String,
+    final_findings: Option<String>,
+    methodology_summary: Option<String>,
+    key_results: Option<String>,
+    recommendations: Option<String>,
+    limitations: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "aerospace_engineer")?;
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    if final_notes.trim().is_empty() {
+        return Err("Final notes are required".to_string());
+    }
+
+    // Verify this task is assigned to the requesting engineer
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM aerospace_assigned_tasks WHERE id = $1 AND assigned_to = $2 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .bind(session.user_id)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    if row.is_none() {
+        return Err("Task not found or not assigned to you".to_string());
+    }
+
+    sqlx::query(
+        "UPDATE aerospace_assigned_tasks SET status = 'conclusion_requested', \
+         conclusion_requested_at = NOW(), conclusion_requested_by = $1, \
+         final_notes = $2, final_findings = $3, methodology_summary = $4, \
+         key_results = $5, recommendations = $6, limitations = $7 \
+         WHERE id = $8 AND deleted_at IS NULL",
+    )
+    .bind(session.user_id)
+    .bind(&final_notes)
+    .bind(&final_findings)
+    .bind(&methodology_summary)
+    .bind(&key_results)
+    .bind(&recommendations)
+    .bind(&limitations)
+    .bind(tid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "REQUEST_AEROSPACE_TASK_CONCLUSION",
+        Some("aerospace_assigned_tasks"),
+        Some(tid),
+        None,
+        Some(serde_json::json!({ "task_id": task_id })),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Director/Taskmaster approves or rejects an aerospace task conclusion request.
+/// Does NOT go through the voting system — direct approval by the assigning director.
+#[tauri::command]
+pub async fn approve_aerospace_task_conclusion(
+    token: String,
+    task_id: String,
+    decision: String,
+    review_notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    // Requires director tier or the_taskmaster role
+    if session.tier < 3 && session.role_name != "the_taskmaster" {
+        return Err("Only directors (tier 3+) or The Taskmaster can approve task conclusions".to_string());
+    }
+
+    if decision != "approve" && decision != "reject" {
+        return Err("Decision must be 'approve' or 'reject'".to_string());
+    }
+
+    let tid = Uuid::parse_str(&task_id).map_err(|_| "Invalid task ID".to_string())?;
+
+    // Verify the task has a pending conclusion request
+    let row: Option<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT status, assigned_by FROM aerospace_assigned_tasks WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(tid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    match &row {
+        None => return Err("Task not found".to_string()),
+        Some((status, _)) if status != "conclusion_requested" => {
+            return Err(format!("Task is not in 'conclusion_requested' state (current: {})", status))
+        }
+        _ => {}
+    }
+
+    match decision.as_str() {
+        "approve" => {
+            sqlx::query(
+                "UPDATE aerospace_assigned_tasks SET status = 'completed', \
+                 conclusion_approved_at = NOW(), conclusion_approved_by = $1, \
+                 progress_notes = COALESCE($2, progress_notes) \
+                 WHERE id = $3 AND deleted_at IS NULL",
+            )
+            .bind(session.user_id)
+            .bind(&review_notes)
+            .bind(tid)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+        }
+        "reject" => {
+            sqlx::query(
+                "UPDATE aerospace_assigned_tasks SET status = 'in_progress', \
+                 conclusion_requested_at = NULL, conclusion_requested_by = NULL, \
+                 progress_notes = COALESCE($1, progress_notes) \
+                 WHERE id = $2 AND deleted_at IS NULL",
+            )
+            .bind(&review_notes)
+            .bind(tid)
+            .execute(db::get_db())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+        }
+        _ => unreachable!(),
+    }
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "APPROVE_AEROSPACE_TASK_CONCLUSION",
+        Some("aerospace_assigned_tasks"),
+        Some(tid),
+        None,
+        Some(serde_json::json!({ "decision": decision })),
+    )
+    .await;
+
+    Ok(())
+}
+
+// ─── Ships Archive ───────────────────────────────────────────────────────────
+
+/// List all ships with full details. Available to all authenticated users.
+#[tauri::command]
+pub async fn get_all_ships(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = sqlx::query_as::<_, ShipRow>(
+        "SELECT id, name, ship_name, model, capacity, ship_type, status, build_status, \
+         blueprint_approver, launch_date, materials_used, last_updated, created_at \
+         FROM ships WHERE deleted_at IS NULL ORDER BY created_at DESC",
+    )
+    .fetch_all(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+/// Retrieve a single ship with its related blueprint proposals and approvals.
+#[tauri::command]
+pub async fn get_ship_details(token: String, ship_id: String) -> Result<serde_json::Value, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let sid = Uuid::parse_str(&ship_id).map_err(|_| "Invalid ship ID".to_string())?;
+
+    let ship = sqlx::query_as::<_, ShipRow>(
+        "SELECT id, name, ship_name, model, capacity, ship_type, status, build_status, \
+         blueprint_approver, launch_date, materials_used, last_updated, created_at \
+         FROM ships WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(sid)
+    .fetch_optional(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?
+    .ok_or_else(|| "Ship not found".to_string())?;
+
+    // Fetch related blueprint proposals
+    aerospace_queries::ensure_blueprint_proposals_table()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let blueprints = aerospace_queries::get_all_blueprint_proposals()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .into_iter()
+        .filter(|bp| bp.ship_id == Some(sid))
+        .map(|bp| serde_json::to_value(bp).unwrap_or_default())
+        .collect::<Vec<_>>();
+
+    let ship_json = serde_json::to_value(&ship).unwrap_or_default();
+    Ok(serde_json::json!({
+        "ship": ship_json,
+        "blueprints": blueprints,
+    }))
+}
+
+// ─── Help Requests ───────────────────────────────────────────────────────────
+
+/// Submit a help request. Routing is determined by the requester's role:
+///   - aerospace_engineer → the_artificer
+///   - biological_engineer / agricultural_engineer → the_observer
+#[tauri::command]
+pub async fn submit_help_request(
+    token: String,
+    title: String,
+    description: Option<String>,
+    category: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+
+    if title.trim().is_empty() {
+        return Err("Title is required".to_string());
+    }
+
+    let assigned_proxy_director = match session.role_name.as_str() {
+        "aerospace_engineer" => "the_artificer",
+        "biological_engineer" | "agricultural_engineer" => "the_observer",
+        _ => "the_artificer",
+    };
+
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO help_requests (requested_by, title, description, category, assigned_proxy_director, status) \
+         VALUES ($1, $2, $3, $4, $5, 'open') RETURNING id",
+    )
+    .bind(session.user_id)
+    .bind(&title)
+    .bind(&description)
+    .bind(&category)
+    .bind(assigned_proxy_director)
+    .fetch_one(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "SUBMIT_HELP_REQUEST",
+        Some("help_requests"),
+        Some(row.0),
+        None,
+        Some(serde_json::json!({ "title": title, "proxy": assigned_proxy_director })),
+    )
+    .await;
+
+    Ok(row.0.to_string())
+}
+
+/// Retrieve help requests.
+/// Directors see all requests assigned to their proxy role.
+/// Engineers see their own requests.
+#[tauri::command]
+pub async fn get_help_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+
+    let rows = if session.tier >= 3 {
+        // Directors see requests routed to them
+        let proxy_role = session.role_name.as_str();
+        sqlx::query_as::<_, HelpRequestRow>(
+            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at \
+             FROM help_requests WHERE assigned_proxy_director = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        )
+        .bind(proxy_role)
+        .fetch_all(db::get_db())
+        .await
+    } else {
+        // Engineers see their own requests
+        sqlx::query_as::<_, HelpRequestRow>(
+            "SELECT id, requested_by, title, description, category, assigned_proxy_director, status, response, resolved_by, created_at \
+             FROM help_requests WHERE requested_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        )
+        .bind(session.user_id)
+        .fetch_all(db::get_db())
+        .await
+    }
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+/// Director resolves or updates a help request (e.g., marks it converted to a task).
+#[tauri::command]
+pub async fn resolve_help_request(
+    token: String,
+    request_id: String,
+    status: String,
+    response: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role(&session, 3)?;
+
+    let valid_statuses = ["in_review", "converted", "resolved", "closed"];
+    if !valid_statuses.contains(&status.as_str()) {
+        return Err(format!("Invalid status '{}'. Must be one of: in_review, converted, resolved, closed", status));
+    }
+
+    let rid = Uuid::parse_str(&request_id).map_err(|_| "Invalid request ID".to_string())?;
+
+    sqlx::query(
+        "UPDATE help_requests SET status = $1, response = COALESCE($2, response), resolved_by = $3 \
+         WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(&status)
+    .bind(&response)
+    .bind(session.user_id)
+    .bind(rid)
+    .execute(db::get_db())
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "RESOLVE_HELP_REQUEST",
+        Some("help_requests"),
+        Some(rid),
         None,
         Some(serde_json::json!({ "status": status })),
     )

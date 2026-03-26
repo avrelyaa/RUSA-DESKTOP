@@ -5,11 +5,11 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
-  import { researchApi, researchTaskApi, userApi } from '$lib/api';
+  import { researchApi, researchTaskApi, userApi, aerospaceApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard';
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests';
   let activeTab = $state<Tab>('experiments');
 
   let experiments: any[] = $state([]);
@@ -32,6 +32,18 @@
   let speciesClass = $state('');
   let speciesDesc = $state('');
   let speciesHabitat = $state('');
+  let speciesCategory = $state('unknown');
+
+  // Help request form (research/biological/agricultural engineers)
+  let helpReqOpen = $state(false);
+  let hrTitle = $state('');
+  let hrDesc = $state('');
+  let hrCategory = $state('');
+  let helpRequests: any[] = $state([]);
+  let helpResolveOpen = $state(false);
+  let helpResolveTarget: any = $state(null);
+  let helpResolveStatus = $state('in_review');
+  let helpResolveResponse = $state('');
 
   // Test form
   let testOpen = $state(false);
@@ -118,6 +130,11 @@
 
   const isTaskmaster = $derived($session?.role_name === 'the_taskmaster');
   const isObserver = $derived($session?.role_name === 'the_observer');
+  const isResearchEngineer = $derived(
+    $session?.role_name === 'biological_engineer' ||
+    $session?.role_name === 'agricultural_engineer'
+  );
+  const isAgriculturalEngineer = $derived($session?.role_name === 'agricultural_engineer');
 
   const canReviewExperiment = $derived(
     $session?.role_name === 'the_observer' ||
@@ -146,11 +163,12 @@
     if (!s) return;
     loading = true;
     try {
-      [experiments, species, tests, researchTasks] = await Promise.all([
+      [experiments, species, tests, researchTasks, helpRequests] = await Promise.all([
         researchApi.getExperiments(s.token),
         researchApi.getSpeciesArchive(s.token),
         researchApi.getTestArchive(s.token),
         researchTaskApi.getTasks(s.token),
+        aerospaceApi.getHelpRequests(s.token),
       ]);
       allUsers = await userApi.getAll(s.token);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
@@ -172,9 +190,9 @@
     const s = $session; if (!s) return;
     if (!speciesName) { showToast('Name required', 'error'); return; }
     try {
-      await researchApi.addSpecies(s.token, speciesName, speciesClass || undefined, speciesDesc || undefined, speciesHabitat || undefined);
+      await researchApi.addSpecies(s.token, speciesName, speciesClass || undefined, speciesDesc || undefined, speciesHabitat || undefined, speciesCategory || undefined);
       showToast('Species added', 'success');
-      speciesOpen = false; speciesName = ''; speciesClass = ''; speciesDesc = ''; speciesHabitat = '';
+      speciesOpen = false; speciesName = ''; speciesClass = ''; speciesDesc = ''; speciesHabitat = ''; speciesCategory = 'unknown';
       species = await researchApi.getSpeciesArchive(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -434,6 +452,34 @@
     }
   });
 
+  async function submitHelpRequest() {
+    const s = $session; if (!s) return;
+    if (!hrTitle) { showToast('Title required', 'error'); return; }
+    try {
+      await aerospaceApi.submitHelpRequest(s.token, hrTitle, hrDesc || undefined, hrCategory || undefined);
+      showToast('Help request submitted', 'success');
+      helpReqOpen = false; hrTitle = ''; hrDesc = ''; hrCategory = '';
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpResolve(req: any) {
+    helpResolveTarget = req;
+    helpResolveStatus = 'in_review';
+    helpResolveResponse = '';
+    helpResolveOpen = true;
+  }
+
+  async function submitHelpResolve() {
+    const s = $session; if (!s || !helpResolveTarget) return;
+    try {
+      await aerospaceApi.resolveHelpRequest(s.token, helpResolveTarget.id, helpResolveStatus, helpResolveResponse || undefined);
+      showToast('Help request updated', 'success');
+      helpResolveOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
   function statusBadgeClass(status: string | null | undefined): string {
     switch (status) {
       case 'pending': return 'badge badge-open';
@@ -478,6 +524,21 @@
     { value: 'rejected', label: 'Rejected' },
     { value: 'under_review', label: 'Under Review' },
   ];
+  const helpResolveOpts = [
+    { value: 'in_review', label: 'In Review' },
+    { value: 'converted', label: 'Converted to Task' },
+    { value: 'resolved', label: 'Resolved' },
+    { value: 'closed', label: 'Closed' },
+  ];
+  const speciesCategoryOpts = [
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'plant', label: 'Plant' },
+    { value: 'animal', label: 'Animal' },
+    { value: 'microorganism', label: 'Microorganism' },
+    { value: 'fungus', label: 'Fungus' },
+    { value: 'other', label: 'Other' },
+  ];
+  const isDirector = $derived(($session?.tier ?? 0) >= 3);
 </script>
 
 <svelte:head><title>RUSA IMS — Research & Lab</title></svelte:head>
@@ -500,6 +561,9 @@
         Observer Dashboard
       </button>
     {/if}
+    <button class="tab" class:active={activeTab==='help_requests'} onclick={() => activeTab='help_requests'}>
+      Help Requests {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}<span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>{/if}
+    </button>
   </div>
 
   {#if loading}
@@ -561,9 +625,17 @@
     {/if}
   {:else if activeTab === 'species'}
     <div class="section-bar">
-      <h2 class="section-title">Species Archive</h2>
-      <button class="btn-primary" onclick={() => speciesOpen = true}>+ Add Species</button>
+      <h2 class="section-title">
+        Species Archive
+        {#if isAgriculturalEngineer}
+          <span class="plant-only-badge">🌿 Plants Only</span>
+        {/if}
+      </h2>
+      <button class="btn-primary" onclick={() => { speciesCategory = isAgriculturalEngineer ? 'plant' : 'unknown'; speciesOpen = true; }}>+ Add Species</button>
     </div>
+    {#if isAgriculturalEngineer}
+      <p class="access-note">⚠️ Agricultural engineers have access to <strong>plant species only</strong>. New species are pre-categorized as plants.</p>
+    {/if}
     {#if species.length === 0}
       <p class="empty">No species in archive.</p>
     {:else}
@@ -572,6 +644,7 @@
           <thead>
             <tr>
               <th>Name</th>
+              <th>Category</th>
               <th>Classification</th>
               <th>Habitat</th>
               <th>Archive Status</th>
@@ -582,6 +655,13 @@
             {#each species as sp}
               <tr>
                 <td>{sp.name}</td>
+                <td>
+                  {#if sp.species_category && sp.species_category !== 'unknown'}
+                    <span class="species-cat-badge species-cat-{sp.species_category}">{sp.species_category}</span>
+                  {:else}
+                    <span class="badge">—</span>
+                  {/if}
+                </td>
                 <td>{sp.classification ?? '—'}</td>
                 <td>{sp.habitat ?? '—'}</td>
                 <td>
@@ -766,6 +846,55 @@
     {:else}
       <p class="empty">Dashboard not loaded.</p>
     {/if}
+
+  {:else if activeTab === 'help_requests'}
+    <div class="section-bar">
+      <h2 class="section-title">Help Requests</h2>
+      {#if isResearchEngineer}
+        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
+      {/if}
+    </div>
+    {#if isResearchEngineer}
+      <p class="access-note">🔀 Help requests are automatically routed to <strong>The Observer</strong> as proxy director.</p>
+    {/if}
+    {#if helpRequests.length === 0}
+      <p class="empty">No help requests found.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Routed To</th>
+              <th>Status</th>
+              <th>Response</th>
+              <th>Date</th>
+              {#if isDirector}<th>Actions</th>{/if}
+            </tr>
+          </thead>
+          <tbody>
+            {#each helpRequests as req}
+              <tr>
+                <td>{req.title}</td>
+                <td>{req.category ?? '—'}</td>
+                <td><span class="proxy-badge">{req.assigned_proxy_director}</span></td>
+                <td><span class="badge {req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'converted' ? 'badge-progress' : 'badge-open'}">{req.status ?? '—'}</span></td>
+                <td class="notes-preview">{req.response ?? '—'}</td>
+                <td>{req.created_at ? new Date(req.created_at).toLocaleDateString() : '—'}</td>
+                {#if isDirector}
+                  <td>
+                    {#if req.status === 'open' || req.status === 'in_review'}
+                      <button class="btn-small btn-observer" onclick={() => openHelpResolve(req)}>Update</button>
+                    {/if}
+                  </td>
+                {/if}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </PageShell>
 
@@ -786,6 +915,7 @@
 <Modal bind:open={speciesOpen} title="Add Species">
   <div class="form">
     <Field label="Name" bind:value={speciesName} required />
+    <Field label="Category" type="select" bind:value={speciesCategory} options={speciesCategoryOpts} />
     <Field label="Classification" bind:value={speciesClass} />
     <Field label="Description" type="textarea" bind:value={speciesDesc} />
     <Field label="Habitat" bind:value={speciesHabitat} />
@@ -1051,6 +1181,36 @@
   </div>
 </Modal>
 
+<Modal bind:open={helpReqOpen} title="Send Help Request">
+  <div class="form">
+    <p class="access-note">🔀 This request will be automatically routed to <strong>The Observer</strong> as proxy director.</p>
+    <Field label="Title" bind:value={hrTitle} required />
+    <Field label="Description" type="textarea" bind:value={hrDesc} rows={4} />
+    <Field label="Category (optional)" bind:value={hrCategory} placeholder="e.g. equipment, data, guidance" />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpReqOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpRequest}>Send Help Request</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpResolveOpen} title="Update Help Request">
+  <div class="form">
+    {#if helpResolveTarget}
+      <p class="info-text">Request: <strong>{helpResolveTarget.title}</strong></p>
+      {#if helpResolveTarget.description}
+        <p class="info-text">{helpResolveTarget.description}</p>
+      {/if}
+    {/if}
+    <Field label="Status" type="select" bind:value={helpResolveStatus} options={helpResolveOpts} />
+    <Field label="Response / Notes" type="textarea" bind:value={helpResolveResponse} rows={3} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpResolveOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpResolve}>Update</button>
+    </div>
+  </div>
+</Modal>
+
 <style>
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
@@ -1116,4 +1276,14 @@
   .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
   .discovery-badge { background: rgba(0,200,83,0.08); border-radius: 3px; color: #00c853; display: inline-block; font-size: 0.8rem; padding: 2px 6px; }
   .dashboard-section { margin-bottom: 2rem; }
+  .access-note { background: rgba(255,193,7,0.07); border: 1px solid rgba(255,193,7,0.2); border-radius: 4px; color: #ffc107; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem; padding: 0.6rem 0.75rem; }
+  .plant-only-badge { background: rgba(0,200,83,0.12); border-radius: 3px; color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; margin-left: 0.5rem; padding: 0.2rem 0.5rem; text-transform: uppercase; vertical-align: middle; }
+  .proxy-badge { background: rgba(0,212,255,0.1); border-radius: 3px; color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.65rem; padding: 0.2rem 0.5rem; }
+  .species-cat-badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
+  .species-cat-plant { background: rgba(0,200,83,0.12); color: #00c853; }
+  .species-cat-animal { background: rgba(255,152,0,0.12); color: #ff9800; }
+  .species-cat-microorganism { background: rgba(156,39,176,0.12); color: #ce93d8; }
+  .species-cat-fungus { background: rgba(121,85,72,0.15); color: #bcaaa4; }
+  .species-cat-other { background: rgba(61,127,255,0.1); color: #8fa3cc; }
+  .info-text { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.25rem; }
 </style>

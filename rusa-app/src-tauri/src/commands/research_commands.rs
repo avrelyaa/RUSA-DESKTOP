@@ -42,6 +42,7 @@ struct SpeciesRow {
     approval_status: Option<String>,
     approved_at: Option<chrono::DateTime<chrono::Utc>>,
     approved_by: Option<Uuid>,
+    species_category: Option<String>,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -188,13 +189,22 @@ pub async fn add_experiment_log(
 
 #[tauri::command]
 pub async fn get_species_archive(token: String) -> Result<Vec<serde_json::Value>, String> {
-    let _session = validate_session_command(&token).await?;
+    let session = validate_session_command(&token).await?;
 
-    let rows = sqlx::query_as::<_, SpeciesRow>(
-        "SELECT id, name, classification, description, habitat, discovered_by, created_at, discovery_experiment_id, approval_status, approved_at, approved_by FROM species_archive WHERE deleted_at IS NULL ORDER BY name"
-    )
-    .fetch_all(db::get_db())
-    .await
+    // Agricultural engineers can only view plant species
+    let rows = if session.role_name == "agricultural_engineer" {
+        sqlx::query_as::<_, SpeciesRow>(
+            "SELECT id, name, classification, description, habitat, discovered_by, created_at, discovery_experiment_id, approval_status, approved_at, approved_by, species_category FROM species_archive WHERE deleted_at IS NULL AND species_category = 'plant' ORDER BY name"
+        )
+        .fetch_all(db::get_db())
+        .await
+    } else {
+        sqlx::query_as::<_, SpeciesRow>(
+            "SELECT id, name, classification, description, habitat, discovered_by, created_at, discovery_experiment_id, approval_status, approved_at, approved_by, species_category FROM species_archive WHERE deleted_at IS NULL ORDER BY name"
+        )
+        .fetch_all(db::get_db())
+        .await
+    }
     .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
@@ -207,18 +217,21 @@ pub async fn add_species(
     classification: Option<String>,
     description: Option<String>,
     habitat: Option<String>,
+    species_category: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
 
+    let category = species_category.as_deref().unwrap_or("unknown");
+
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO species_archive (name, classification, description, habitat, discovered_by) VALUES ($1,$2,$3,$4,$5) RETURNING id"
+        "INSERT INTO species_archive (name, classification, description, habitat, discovered_by, species_category) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id"
     )
-    .bind(&name).bind(&classification).bind(&description).bind(&habitat).bind(session.user_id)
+    .bind(&name).bind(&classification).bind(&description).bind(&habitat).bind(session.user_id).bind(category)
     .fetch_one(db::get_db())
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "ADD_SPECIES", Some("species_archive"), Some(row.0), None, Some(serde_json::json!({ "name": name }))).await;
+    let _ = write_audit_log(Some(session.user_id), "ADD_SPECIES", Some("species_archive"), Some(row.0), None, Some(serde_json::json!({ "name": name, "category": category }))).await;
     Ok(row.0.to_string())
 }
 
