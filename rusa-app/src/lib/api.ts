@@ -138,11 +138,13 @@ export const securityApi = {
     invoke<string>('add_lost_found_item', { token, itemName, description, foundLocation, foundDate }),
   getLostFound: (token: string) => invoke<any[]>('get_lost_found', { token }),
   claimLostFound: (token: string, itemId: string) => invoke<void>('claim_lost_found', { token, itemId }),
-  submitBroadcastRequest: (token: string, title: string, content: string, targetAudience?: string) =>
-    invoke<string>('submit_broadcast_request', { token, title, content, targetAudience }),
+  submitBroadcastRequest: (token: string, title: string, content: string, targetAudience?: string, targetFilters?: any) =>
+    invoke<string>('submit_broadcast_request', { token, title, content, targetAudience, targetFilters }),
   getBroadcastRequests: (token: string) => invoke<any[]>('get_broadcast_requests', { token }),
-  reviewBroadcast: (token: string, requestId: string, status: string, notes?: string) =>
-    invoke<void>('review_broadcast_request', { token, requestId, status, notes }),
+  sendBroadcastDirect: (token: string, title: string, content: string, targetFilters?: any, scheduledAt?: string) =>
+    invoke<string>('send_broadcast_direct', { token, title, content, targetFilters, scheduledAt }),
+  reviewBroadcast: (token: string, requestId: string, status: string, notes?: string, scheduledAt?: string) =>
+    invoke<void>('review_broadcast_request', { token, requestId, status, notes, scheduledAt }),
   submitFindings: (token: string, title: string, description?: string, findingsDate?: string) =>
     invoke<string>('submit_security_findings', { token, title, description, findingsDate }),
   getFindings: (token: string) => invoke<any[]>('get_security_findings', { token }),

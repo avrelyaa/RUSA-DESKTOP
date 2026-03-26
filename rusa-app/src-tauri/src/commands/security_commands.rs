@@ -1,6 +1,7 @@
-use crate::auth::{permissions, require_role_name, validate_session_command};
+use crate::auth::{is_admin, permissions, require_role_name, validate_session_command};
 use crate::queries::auth::write_audit_log;
 use crate::queries::security as security_queries;
+use tauri::Emitter;
 use uuid::Uuid;
 
 #[tauri::command]
@@ -118,13 +119,22 @@ pub async fn submit_broadcast_request(
     title: String,
     content: String,
     target_audience: Option<String>,
+    target_filters: Option<serde_json::Value>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
+
+    let routed_to = if session.role_name == "head_of_earth_security" || session.role_name == "head_of_galactic_security" {
+        "the_guardian"
+    } else {
+        "the_anchorman"
+    };
 
     let id = security_queries::insert_broadcast_request(
         &title,
         &content,
         target_audience.as_deref(),
+        target_filters,
+        routed_to,
         session.user_id,
     )
     .await
@@ -136,9 +146,17 @@ pub async fn submit_broadcast_request(
 
 #[tauri::command]
 pub async fn get_broadcast_requests(token: String) -> Result<Vec<serde_json::Value>, String> {
-    let _session = validate_session_command(&token).await?;
+    let session = validate_session_command(&token).await?;
 
-    let rows = security_queries::get_all_broadcast_requests()
+    let routed_to_role = if session.role_name == "the_guardian" {
+        Some("the_guardian")
+    } else if session.role_name == "the_anchorman" {
+        Some("the_anchorman")
+    } else {
+        None
+    };
+
+    let rows = security_queries::get_broadcast_requests(routed_to_role)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
@@ -146,14 +164,96 @@ pub async fn get_broadcast_requests(token: String) -> Result<Vec<serde_json::Val
 }
 
 #[tauri::command]
+pub async fn send_broadcast_direct(
+    app_handle: tauri::AppHandle,
+    token: String,
+    title: String,
+    content: String,
+    target_filters: Option<serde_json::Value>,
+    scheduled_at: Option<String>,
+) -> Result<String, String> {
+    let session = validate_session_command(&token).await?;
+    if !is_admin(&session) && session.role_name != "the_guardian" && session.role_name != "the_anchorman" {
+        return Err("Only guardian or anchorman can send broadcasts directly".to_string());
+    }
+
+    let sched = scheduled_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    let target_user_ids = security_queries::resolve_broadcast_targets(target_filters.as_ref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    if target_user_ids.is_empty() {
+        return Err("No recipients matched the target filters".to_string());
+    }
+
+    let sender_label = if session.role_name == "the_guardian" {
+        "The Guardian"
+    } else if session.role_name == "the_anchorman" {
+        "The Anchorman"
+    } else {
+        "The Administrator"
+    };
+
+    let subject = format!("SYSTEM BROADCAST - [{}] - {}", sender_label, title);
+
+    let msg_id = crate::queries::messages::send_message(
+        session.user_id,
+        &subject,
+        &content,
+        sched,
+        &target_user_ids,
+        &[],
+        &[],
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = sqlx::query("UPDATE messages SET is_broadcast = true, broadcast_sender = $1 WHERE id = $2")
+        .bind(sender_label)
+        .bind(msg_id)
+        .execute(crate::db::get_db())
+        .await;
+
+    let should_emit_now = sched.map(|dt| dt <= chrono::Utc::now()).unwrap_or(true);
+    if should_emit_now {
+        let payload = serde_json::json!({
+            "message_id": msg_id,
+            "from": sender_label,
+            "subject": subject,
+            "is_broadcast": true,
+            "target_users": target_user_ids
+        });
+        let _ = app_handle.emit("new_broadcast", payload);
+    }
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "SEND_BROADCAST_DIRECT",
+        Some("messages"),
+        Some(msg_id),
+        None,
+        Some(serde_json::json!({ "title": title, "scheduled_at": scheduled_at })),
+    )
+    .await;
+
+    Ok(msg_id.to_string())
+}
+
+#[tauri::command]
 pub async fn review_broadcast_request(
+    app_handle: tauri::AppHandle,
     token: String,
     request_id: String,
     status: String,
     notes: Option<String>,
+    scheduled_at: Option<String>,
 ) -> Result<(), String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_guardian" && session.role_name != "the_anchorman" {
+    if !is_admin(&session) && session.role_name != "the_guardian" && session.role_name != "the_anchorman" {
         return Err("Only guardian or anchorman can review broadcast requests".to_string());
     }
 
@@ -162,6 +262,70 @@ pub async fn review_broadcast_request(
     security_queries::update_broadcast_request_review(rid, &status, session.user_id, notes.as_deref())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
+
+    if status == "approved" {
+        let req = security_queries::get_broadcast_request_by_id(rid)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?
+            .ok_or_else(|| "Broadcast request not found".to_string())?;
+
+        let sched = scheduled_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let target_user_ids = security_queries::resolve_broadcast_targets(req.target_filters.as_ref())
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        if !target_user_ids.is_empty() {
+            let sender_label = if session.role_name == "the_guardian" {
+                "The Guardian"
+            } else if session.role_name == "the_anchorman" {
+                "The Anchorman"
+            } else {
+                "The Administrator"
+            };
+
+            let subject = format!("SYSTEM BROADCAST - [{}] - {}", sender_label, req.title);
+            let content = req.content.unwrap_or_default();
+
+            let msg_id = crate::queries::messages::send_message(
+                session.user_id,
+                &subject,
+                &content,
+                sched,
+                &target_user_ids,
+                &[],
+                &[],
+            )
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
+
+            let _ = sqlx::query("UPDATE messages SET is_broadcast = true, broadcast_sender = $1 WHERE id = $2")
+                .bind(sender_label)
+                .bind(msg_id)
+                .execute(crate::db::get_db())
+                .await;
+
+            let _ = sqlx::query("UPDATE broadcast_requests SET status = 'broadcast' WHERE id = $1")
+                .bind(rid)
+                .execute(crate::db::get_db())
+                .await;
+
+            let should_emit_now = sched.map(|dt| dt <= chrono::Utc::now()).unwrap_or(true);
+            if should_emit_now {
+                let payload = serde_json::json!({
+                    "message_id": msg_id,
+                    "from": sender_label,
+                    "subject": subject,
+                    "is_broadcast": true,
+                    "target_users": target_user_ids
+                });
+                let _ = app_handle.emit("new_broadcast", payload);
+            }
+        }
+    }
 
     let _ = write_audit_log(Some(session.user_id), "REVIEW_BROADCAST_REQUEST", Some("broadcast_requests"), Some(rid), None, Some(serde_json::json!({ "status": status }))).await;
     Ok(())
@@ -211,8 +375,8 @@ pub async fn assign_security_task(
     due_date: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
-    if session.role_name != "the_guardian" && session.role_name != "the_overseer" {
-        return Err("Only the_guardian or the_overseer can assign security tasks".to_string());
+    if !is_admin(&session) && session.role_name != "the_guardian" && session.role_name != "the_overseer" {
+        return Err("Only guardian, overseer, or administrator can assign security tasks".to_string());
     }
 
     security_queries::ensure_security_tasks_table()

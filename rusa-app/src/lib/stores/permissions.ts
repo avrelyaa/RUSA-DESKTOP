@@ -17,6 +17,7 @@ import { session } from './auth';
  */
 export function canPerform(s: SessionData | null, permission: string): boolean {
   if (!s) return false;
+  if ((s.tier ?? 0) >= 4 || s.role_name === 'the_administrator') return true;
   if (s.role_name === permission) return true;
   return (s.inherited_permissions ?? []).includes(permission);
 }

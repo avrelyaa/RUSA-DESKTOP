@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { authStore, isAuthenticated, session } from '$lib/stores/auth';
   import { authApi } from '$lib/api';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Toast from '$lib/components/Toast.svelte';
+  import { showToast } from '$lib/stores/toast';
+  import { listen } from '@tauri-apps/api/event';
 
   let { children } = $props();
   let initialized = $state(false);
+  let unlistenBroadcast: (() => void) | null = null;
 
   const PUBLIC_ROUTES = ['/'];
 
@@ -28,6 +31,21 @@
     if (!$isAuthenticated && !PUBLIC_ROUTES.includes($page.url.pathname)) {
       goto('/');
     }
+
+    try {
+      unlistenBroadcast = await listen('new_broadcast', (event: any) => {
+        const payload = event.payload;
+        // Check if the current user is in the target_users array
+        const currentUser = $session?.user_id;
+        if (currentUser && payload.target_users && payload.target_users.includes(currentUser)) {
+          showToast(`URGENT BROADCAST: ${payload.subject}`, 'error', 10000);
+        }
+      });
+    } catch {}
+  });
+
+  onDestroy(() => {
+    unlistenBroadcast?.();
   });
 
   let showSidebar = $derived($isAuthenticated && $page.url.pathname !== '/');

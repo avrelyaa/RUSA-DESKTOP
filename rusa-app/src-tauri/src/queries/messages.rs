@@ -6,7 +6,7 @@ pub async fn get_inbox(user_id: Uuid) -> Result<Vec<Message>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Message>(
         r#"
         SELECT m.id, m.from_user_id, m.subject, m.body, m.scheduled_at, m.sent_at,
-               m.recalled_at, m.is_draft, m.created_at, m.deleted_at
+               m.recalled_at, m.is_draft, m.is_broadcast, m.broadcast_sender, m.created_at, m.deleted_at
         FROM messages m
         JOIN message_recipients mr ON m.id = mr.message_id
         WHERE mr.recipient_id = $1
@@ -14,6 +14,7 @@ pub async fn get_inbox(user_id: Uuid) -> Result<Vec<Message>, sqlx::Error> {
           AND m.deleted_at IS NULL
           AND m.is_draft = false
           AND m.recalled_at IS NULL
+          AND m.sent_at <= NOW()
         ORDER BY m.sent_at DESC
         "#,
     )
@@ -28,7 +29,7 @@ pub async fn get_sent(user_id: Uuid) -> Result<Vec<Message>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Message>(
         r#"
         SELECT id, from_user_id, subject, body, scheduled_at, sent_at,
-               recalled_at, is_draft, created_at, deleted_at
+               recalled_at, is_draft, is_broadcast, broadcast_sender, created_at, deleted_at
         FROM messages
         WHERE from_user_id = $1
           AND deleted_at IS NULL
@@ -47,7 +48,7 @@ pub async fn get_drafts(user_id: Uuid) -> Result<Vec<Message>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Message>(
         r#"
         SELECT id, from_user_id, subject, body, scheduled_at, sent_at,
-               recalled_at, is_draft, created_at, deleted_at
+               recalled_at, is_draft, is_broadcast, broadcast_sender, created_at, deleted_at
         FROM messages
         WHERE from_user_id = $1
           AND deleted_at IS NULL
@@ -73,8 +74,16 @@ pub async fn send_message(
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
         r#"
-        INSERT INTO messages (from_user_id, subject, body, scheduled_at, is_draft)
-        VALUES ($1, $2, $3, $4, false)
+        INSERT INTO messages (from_user_id, subject, body, scheduled_at, sent_at, notified_at, is_draft)
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          COALESCE($4, NOW()),
+          CASE WHEN $4 IS NULL OR $4 <= NOW() THEN NOW() ELSE NULL END,
+          false
+        )
         RETURNING id
         "#,
     )

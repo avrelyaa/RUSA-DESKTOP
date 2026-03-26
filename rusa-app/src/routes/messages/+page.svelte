@@ -3,6 +3,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { messageApi, userApi, researchTaskApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
@@ -30,9 +31,9 @@
 
   // Proxy flow: Convert inbox message to research task (Observer/Artificer/Taskmaster)
   const canConvertToTask = $derived(
-    $session?.role_name === 'the_observer' ||
-    $session?.role_name === 'the_artificer' ||
-    $session?.role_name === 'the_taskmaster'
+    canPerform($session, 'the_observer') ||
+    canPerform($session, 'the_artificer') ||
+    canPerform($session, 'the_taskmaster')
   );
   let convertTaskOpen = $state(false);
   let ctTitle = $state('');
@@ -201,8 +202,11 @@
           <p class="list-empty">No messages</p>
         {:else}
           {#each currentList as msg}
-            <button class="msg-item" class:unread={!msg.read_at && activeTab==='inbox'} class:selected={selectedMessage?.id===msg.id} onclick={() => openMessage(msg)}>
-              <div class="msg-item-from">{msg.from_name || msg.from_username || 'Unknown'}</div>
+            <button class="msg-item" class:unread={!msg.read_at && activeTab==='inbox'} class:selected={selectedMessage?.id===msg.id} class:broadcast={msg.is_broadcast} onclick={() => openMessage(msg)}>
+              {#if msg.is_broadcast}
+                <div class="broadcast-flag">HIGH PRIORITY</div>
+              {/if}
+              <div class="msg-item-from">{msg.is_broadcast ? msg.broadcast_sender || 'SYSTEM' : (msg.from_name || msg.from_username || 'Unknown')}</div>
               <div class="msg-item-subject">{msg.subject}</div>
               <div class="msg-item-date">{msg.sent_at ? new Date(msg.sent_at).toLocaleDateString() : '—'}</div>
             </button>
@@ -214,9 +218,12 @@
     <div class="message-view">
       {#if selectedMessage}
         <div class="msg-header">
+          {#if selectedMessage.is_broadcast}
+            <div class="broadcast-banner">SYSTEM BROADCAST - HIGH PRIORITY</div>
+          {/if}
           <h2 class="msg-subject-title">{selectedMessage.subject}</h2>
           <div class="msg-meta">
-            <span>From: <strong>{selectedMessage.from_name || selectedMessage.from_username}</strong></span>
+            <span>From: <strong>{selectedMessage.is_broadcast ? selectedMessage.broadcast_sender || 'SYSTEM' : (selectedMessage.from_name || selectedMessage.from_username)}</strong></span>
             <span>Sent: {selectedMessage.sent_at ? new Date(selectedMessage.sent_at).toLocaleString() : '—'}</span>
           </div>
           {#if selectedMessage.recalled_at}
@@ -347,17 +354,45 @@
   .compose-btn { margin: 0.75rem; padding: 0.5rem; background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; }
   .message-list { flex: 1; overflow-y: auto; }
   .list-empty { padding: 1.5rem; text-align: center; color: #4a5d82; font-size: 0.85rem; }
-  .msg-item { width: 100%; background: none; border: none; border-bottom: 1px solid #1e2d4a; cursor: pointer; padding: 0.875rem 1rem; text-align: left; transition: background 0.15s; }
-  .msg-item:hover { background: rgba(61,127,255,0.06); }
-  .msg-item.selected { background: rgba(0,212,255,0.08); }
-  .msg-item.unread .msg-item-from { color: #00d4ff; font-weight: 600; }
-  .msg-item.unread .msg-item-subject { color: #e8eeff; font-weight: 500; }
-  .msg-item-from { font-size: 0.8rem; color: #8fa3cc; margin-bottom: 0.15rem; }
-  .msg-item-subject { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .msg-item-date { font-size: 0.7rem; color: #4a5d82; }
+  .msg-item {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    padding: 0.875rem 1rem; border: none; border-bottom: 1px solid #1e2d4a;
+    background: transparent; color: #8fa3cc; text-align: left;
+    cursor: pointer; transition: background 0.15s; position: relative;
+    width: 100%;
+  }
+  .msg-item:hover { background: rgba(61,127,255,0.04); }
+  .msg-item.selected { background: #1a2642; }
+  .msg-item.unread .msg-item-from { color: #e8eeff; font-weight: 600; }
+  .msg-item.unread .msg-item-subject { color: #e8eeff; }
+  
+  .msg-item.broadcast {
+    background: rgba(255, 68, 102, 0.05);
+    border-left: 3px solid #ff4466;
+  }
+  .msg-item.broadcast:hover { background: rgba(255, 68, 102, 0.1); }
+  .msg-item.broadcast.selected { background: rgba(255, 68, 102, 0.15); }
+  .msg-item.broadcast .msg-item-from { color: #ff4466; font-weight: 700; }
+  
+  .broadcast-flag {
+    font-size: 0.6rem;
+    font-family: 'Space Mono', monospace;
+    color: #ff4466;
+    background: rgba(255, 68, 102, 0.15);
+    padding: 2px 6px;
+    border-radius: 3px;
+    align-self: flex-start;
+    margin-bottom: 0.25rem;
+    letter-spacing: 0.05em;
+  }
+
+  .msg-item-from { font-size: 0.85rem; color: #c8d8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-item-subject { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-item-date { font-family: 'Space Mono', monospace; font-size: 0.7rem; color: #4a5d82; margin-top: 0.25rem; }
   .message-view { background: #080d1a; padding: 2rem; overflow-y: auto; }
   .msg-empty { color: #4a5d82; text-align: center; margin-top: 4rem; }
   .msg-header { border-bottom: 1px solid #1e2d4a; padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+  .broadcast-banner { background: #ff4466; color: #fff; font-weight: 700; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem; text-align: center; letter-spacing: 0.05em; font-size: 0.85rem; }
   .msg-subject-title { font-family: 'Space Mono', monospace; font-size: 1rem; color: #e8eeff; margin-bottom: 0.75rem; }
   .msg-meta { display: flex; gap: 2rem; font-size: 0.82rem; color: #8fa3cc; }
   .recalled-banner { background: rgba(255,170,0,0.1); border: 1px solid rgba(255,170,0,0.3); border-radius: 4px; color: #ffaa00; font-size: 0.8rem; margin-top: 0.75rem; padding: 0.5rem 0.75rem; }

@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { securityApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
@@ -41,6 +42,20 @@
   let bcTitle = $state('');
   let bcContent = $state('');
   let bcAudience = $state('');
+  let bcFilterPersonnel = $state<string[]>([]);
+  let bcFilterDepts = $state<string[]>([]);
+  let bcFilterLocations = $state<string[]>([]);
+
+  function addBcFilter(type: string) {
+    if (type === 'personnel') bcFilterPersonnel = [...bcFilterPersonnel, ''];
+    if (type === 'dept') bcFilterDepts = [...bcFilterDepts, ''];
+    if (type === 'loc') bcFilterLocations = [...bcFilterLocations, ''];
+  }
+  function removeBcFilter(type: string, i: number) {
+    if (type === 'personnel') bcFilterPersonnel = bcFilterPersonnel.filter((_, idx) => idx !== i);
+    if (type === 'dept') bcFilterDepts = bcFilterDepts.filter((_, idx) => idx !== i);
+    if (type === 'loc') bcFilterLocations = bcFilterLocations.filter((_, idx) => idx !== i);
+  }
 
   // Findings form
   let findingsOpen = $state(false);
@@ -67,18 +82,21 @@
   let updatedStatus = $state('pending');
 
   const isTaskManager = $derived(
-    $session?.role_name === 'the_guardian' || $session?.role_name === 'the_overseer'
+    canPerform($session, 'the_guardian') || canPerform($session, 'the_overseer')
   );
   const isSecurityStaff = $derived(
-    $session?.role_name === 'the_guardian' || $session?.role_name === 'the_overseer' ||
-    $session?.role_name === 'earth_security_head' || $session?.role_name === 'earth_security_staff' ||
-    $session?.role_name === 'galactic_security_head' || $session?.role_name === 'galactic_security_staff'
+    canPerform($session, 'the_guardian') ||
+    canPerform($session, 'the_overseer') ||
+    canPerform($session, 'earth_security_head') ||
+    canPerform($session, 'earth_security_staff') ||
+    canPerform($session, 'galactic_security_head') ||
+    canPerform($session, 'galactic_security_staff')
   );
 
   onMount(async () => {
     const s = $session; if (!s) return;
     loading = true;
-    const isManager = s.role_name === 'the_guardian' || s.role_name === 'the_overseer';
+    const isManager = canPerform(s, 'the_guardian') || canPerform(s, 'the_overseer');
     try {
       const promises: Promise<any>[] = [
         securityApi.getIncidents(s.token),
@@ -149,9 +167,22 @@
     const s = $session; if (!s) return;
     if (!bcTitle || !bcContent) { showToast('Title and content required', 'error'); return; }
     try {
-      await securityApi.submitBroadcastRequest(s.token, bcTitle, bcContent, bcAudience || undefined);
+      const filters = {
+        personnel: bcFilterPersonnel.filter(v => v.trim() !== ''),
+        departments: bcFilterDepts.filter(v => v.trim() !== ''),
+        locations: bcFilterLocations.filter(v => v.trim() !== '')
+      };
+      const hasFilters = filters.personnel.length > 0 || filters.departments.length > 0 || filters.locations.length > 0;
+      await securityApi.submitBroadcastRequest(
+        s.token, 
+        bcTitle, 
+        bcContent, 
+        bcAudience || undefined,
+        hasFilters ? filters : undefined
+      );
       showToast('Broadcast request submitted', 'success');
       broadcastOpen = false; bcTitle = ''; bcContent = ''; bcAudience = '';
+      bcFilterPersonnel = []; bcFilterDepts = []; bcFilterLocations = [];
       broadcasts = await securityApi.getBroadcastRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
@@ -339,9 +370,53 @@
 
 <Modal bind:open={broadcastOpen} title="Submit Broadcast Request">
   <div class="form">
-    <Field label="Title" bind:value={bcTitle} required />
-    <Field label="Content" type="textarea" bind:value={bcContent} required rows={5} />
-    <Field label="Target Audience" bind:value={bcAudience} placeholder="e.g. all, security, medical" />
+    <Field label="Subject (Title)" bind:value={bcTitle} required />
+    <Field label="Message Body" type="textarea" bind:value={bcContent} required rows={5} />
+    <Field label="Target Audience Description" bind:value={bcAudience} placeholder="e.g. all, security, medical" />
+    
+    <div class="filters-section">
+      <p class="section-subtitle">Target Audience Filters (Optional)</p>
+      
+      <div class="filter-group">
+        <div class="filter-head">
+          <span>Specific Personnel (User IDs)</span>
+          <button class="btn-small" onclick={() => addBcFilter('personnel')}>+ Add</button>
+        </div>
+        {#each bcFilterPersonnel as p, i}
+          <div class="filter-row">
+            <input class="field-input" bind:value={bcFilterPersonnel[i]} placeholder="User ID" />
+            <button class="btn-small btn-danger" onclick={() => removeBcFilter('personnel', i)}>X</button>
+          </div>
+        {/each}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-head">
+          <span>Groups / Departments</span>
+          <button class="btn-small" onclick={() => addBcFilter('dept')}>+ Add</button>
+        </div>
+        {#each bcFilterDepts as d, i}
+          <div class="filter-row">
+            <input class="field-input" bind:value={bcFilterDepts[i]} placeholder="Department name" />
+            <button class="btn-small btn-danger" onclick={() => removeBcFilter('dept', i)}>X</button>
+          </div>
+        {/each}
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-head">
+          <span>Planets / Sectors</span>
+          <button class="btn-small" onclick={() => addBcFilter('loc')}>+ Add</button>
+        </div>
+        {#each bcFilterLocations as l, i}
+          <div class="filter-row">
+            <input class="field-input" bind:value={bcFilterLocations[i]} placeholder="Planet/Sector name" />
+            <button class="btn-small btn-danger" onclick={() => removeBcFilter('loc', i)}>X</button>
+          </div>
+        {/each}
+      </div>
+    </div>
+
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => broadcastOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitBroadcast}>Submit</button>
@@ -433,4 +508,52 @@
   .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+
+  .filters-section {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #0f121b;
+    border: 1px solid #1a2035;
+    border-radius: 4px;
+  }
+  .section-subtitle {
+    font-size: 0.9rem;
+    color: #4b5b75;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+    letter-spacing: 0.05em;
+  }
+  .filter-group {
+    margin-bottom: 1rem;
+  }
+  .filter-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #8b9bb4;
+    margin-bottom: 0.5rem;
+  }
+  .filter-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .filter-row .field-input {
+    flex: 1;
+    background: #05070f;
+    border: 1px solid #1a2035;
+    color: #e2e8f0;
+    padding: 0.5rem;
+    border-radius: 4px;
+  }
+  .btn-danger {
+    background: #3a1a1a;
+    color: #ff6b6b;
+    border: 1px solid #ff6b6b;
+  }
+  .btn-danger:hover {
+    background: #ff6b6b;
+    color: #05070f;
+  }
 </style>

@@ -12,6 +12,8 @@ pub struct Message {
     pub sent_at: Option<DateTime<Utc>>,
     pub recalled_at: Option<DateTime<Utc>>,
     pub is_draft: Option<bool>,
+    pub is_broadcast: Option<bool>,
+    pub broadcast_sender: Option<String>,
     pub created_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
 }

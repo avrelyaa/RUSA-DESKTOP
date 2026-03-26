@@ -5,12 +5,19 @@
   import { onMount } from 'svelte';
 
   let inbox: any[] = $state([]);
+  let broadcasts: any[] = $state([]);
   let loading = $state(true);
 
   onMount(async () => {
     const s = $session;
     if (!s) return;
-    try { inbox = await messageApi.getInbox(s.token); } catch {}
+    try {
+      const messages = await messageApi.getInbox(s.token);
+      inbox = messages.filter((m: any) => !m.is_broadcast);
+      broadcasts = messages.filter((m: any) => m.is_broadcast);
+    } catch (e: any) {
+      console.error('Failed to load dashboard data: ' + e);
+    }
     loading = false;
   });
 
@@ -61,25 +68,50 @@
       </div>
     {/if}
   </div>
+
+  <div class="active-broadcasts">
+    <h2 class="section-title" style="color: #ff4466;">Active Broadcasts</h2>
+    {#if loading}
+      <p style="color: #4a5d82">Loading...</p>
+    {:else if broadcasts.length === 0}
+      <p style="color: #4a5d82">No active broadcasts.</p>
+    {:else}
+      <div class="broadcast-list">
+        {#each broadcasts.slice(0, 5) as b}
+          <a href="/messages" class="broadcast-row" class:unread={!b.read_at}>
+            <span class="broadcast-sender">{b.broadcast_sender || 'SYSTEM'}</span>
+            <span class="broadcast-subject">{b.subject}</span>
+            <span class="broadcast-time">{b.sent_at ? new Date(b.sent_at).toLocaleDateString() : '—'}</span>
+          </a>
+        {/each}
+      </div>
+    {/if}
+  </div>
 </PageShell>
 
 <style>
   .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
   .dash-card { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.25rem 1.5rem; }
   .dash-card-label { font-family: 'Space Mono', monospace; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: #4a5d82; margin-bottom: 0.5rem; }
-  .dash-card-value { font-size: 1.4rem; font-weight: 600; color: #e8eeff; margin-bottom: 0.25rem; }
+  .dash-card-value { font-family: 'Outfit', sans-serif; font-size: 1.75rem; font-weight: 600; color: #e8eeff; margin-bottom: 0.25rem; }
   .dash-card-sub { font-size: 0.75rem; color: #8fa3cc; }
   .section-title { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; margin-bottom: 1rem; }
-  .recent-messages { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.25rem; }
-  .message-list { display: flex; flex-direction: column; gap: 0.25rem; }
-  .msg-row {
-    display: grid; grid-template-columns: 150px 1fr 100px;
-    gap: 1rem; padding: 0.625rem 0.75rem; border-radius: 4px;
-    text-decoration: none; color: #8fa3cc; font-size: 0.85rem;
-    transition: background 0.15s;
-  }
-  .msg-row:hover { background: rgba(61,127,255,0.06); }
-  .msg-row.unread { color: #e8eeff; font-weight: 500; }
-  .msg-from { color: #00d4ff; font-size: 0.8rem; }
-  .msg-time { font-size: 0.75rem; text-align: right; color: #4a5d82; }
+
+  .recent-messages, .active-broadcasts { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+  .message-list, .broadcast-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .msg-row { display: grid; grid-template-columns: 150px 1fr 100px; gap: 1rem; padding: 0.75rem 1rem; background: #121b33; border: 1px solid #1e2d4a; border-radius: 4px; text-decoration: none; color: #8fa3cc; transition: all 0.2s; align-items: center; }
+  .msg-row:hover { background: #1a2642; border-color: #2a3f6c; }
+  .msg-row.unread { background: rgba(0, 212, 255, 0.05); border-color: rgba(0, 212, 255, 0.2); }
+  .msg-row.unread .msg-subject { color: #e8eeff; font-weight: 500; }
+  .msg-from { font-weight: 500; color: #c8d8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-subject { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-time { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-align: right; }
+
+  .broadcast-row { display: grid; grid-template-columns: 150px 1fr 100px; gap: 1rem; padding: 0.75rem 1rem; background: #2a0812; border: 1px solid #ff4466; border-radius: 4px; text-decoration: none; color: #ff8899; transition: all 0.2s; align-items: center; }
+  .broadcast-row:hover { background: #3a0a18; border-color: #ff6688; }
+  .broadcast-row.unread { background: rgba(255, 68, 102, 0.15); border-color: #ff4466; box-shadow: 0 0 8px rgba(255, 68, 102, 0.3); }
+  .broadcast-row.unread .broadcast-subject { color: #fff; font-weight: 600; }
+  .broadcast-sender { font-weight: 700; color: #ff4466; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .broadcast-subject { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .broadcast-time { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-align: right; color: #ff8899; }
 </style>

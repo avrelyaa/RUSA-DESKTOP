@@ -4,12 +4,14 @@ pub mod queries;
 pub mod auth;
 pub mod commands;
 
+use tauri::Emitter;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let _app_handle = app.handle().clone();
+            let app_handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
                 let database_url = std::env::var("DATABASE_URL")
                     .unwrap_or_else(|_| "postgres://rusa:rusa@localhost:5432/rusa_ims".to_string());
@@ -21,6 +23,73 @@ pub fn run() {
                     .await
                     .expect("Failed to run DB migrations");
                 db::init_redis(&redis_url).expect("Failed to init Redis");
+            });
+
+            let scheduler_app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                #[derive(sqlx::FromRow)]
+                struct DueMessageRow {
+                    id: uuid::Uuid,
+                    subject: String,
+                    is_broadcast: Option<bool>,
+                    broadcast_sender: Option<String>,
+                }
+
+                loop {
+                    let due: Result<Vec<DueMessageRow>, sqlx::Error> = sqlx::query_as::<_, DueMessageRow>(
+                        r#"
+                        SELECT id, subject, is_broadcast, broadcast_sender
+                        FROM messages
+                        WHERE deleted_at IS NULL
+                          AND recalled_at IS NULL
+                          AND is_draft = false
+                          AND sent_at IS NOT NULL
+                          AND sent_at <= NOW()
+                          AND notified_at IS NULL
+                        ORDER BY sent_at ASC
+                        LIMIT 50
+                        "#,
+                    )
+                    .fetch_all(db::get_db())
+                    .await;
+
+                    if let Ok(rows) = due {
+                        for row in rows {
+                            let _ = sqlx::query("UPDATE messages SET notified_at = NOW() WHERE id = $1 AND notified_at IS NULL")
+                                .bind(row.id)
+                                .execute(db::get_db())
+                                .await;
+
+                            if row.is_broadcast.unwrap_or(false) {
+                                let recipients: Vec<(uuid::Uuid,)> = sqlx::query_as(
+                                    "SELECT recipient_id FROM message_recipients WHERE message_id = $1 AND deleted_at IS NULL",
+                                )
+                                .bind(row.id)
+                                .fetch_all(db::get_db())
+                                .await
+                                .unwrap_or_default();
+                                let target_users: Vec<uuid::Uuid> = recipients.into_iter().map(|r| r.0).collect();
+
+                                let payload = serde_json::json!({
+                                    "message_id": row.id,
+                                    "from": row.broadcast_sender.clone().unwrap_or_else(|| "SYSTEM".to_string()),
+                                    "subject": row.subject,
+                                    "is_broadcast": true,
+                                    "target_users": target_users
+                                });
+                                let _ = scheduler_app.emit("new_broadcast", payload);
+                            } else {
+                                let payload = serde_json::json!({
+                                    "message_id": row.id,
+                                    "subject": row.subject
+                                });
+                                let _ = scheduler_app.emit("new_message", payload);
+                            }
+                        }
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                }
             });
             Ok(())
         })
@@ -80,6 +149,7 @@ pub fn run() {
             commands::security_commands::claim_lost_found,
             commands::security_commands::submit_broadcast_request,
             commands::security_commands::get_broadcast_requests,
+            commands::security_commands::send_broadcast_direct,
             commands::security_commands::review_broadcast_request,
             commands::security_commands::submit_security_findings,
             commands::security_commands::get_security_findings,

@@ -66,12 +66,7 @@ pub fn get_inherited_roles(role_name: &str) -> &'static [&'static str] {
             "galactic_security_head",
             "galactic_security_staff",
         ],
-        "the_overseer" => &[
-            "earth_security_head",
-            "earth_security_staff",
-            "galactic_security_head",
-            "galactic_security_staff",
-        ],
+        "the_overseer" => &["the_guardian", "the_nomad"],
         "the_wanderer" => &["astronaut", "aerospace_engineer"],
         "the_taskmaster" => &["astronaut", "aerospace_engineer"],
         "the_coordinator" => &["settler_commander", "civil_engineer", "farmer"],
@@ -98,18 +93,66 @@ pub fn get_inherited_roles(role_name: &str) -> &'static [&'static str] {
 /// Builds the list of all role names this role's permissions extend to
 /// (i.e. the subordinate roles it inherits – not including itself).
 pub fn build_inherited_permissions(role_name: &str) -> Vec<String> {
-    get_inherited_roles(role_name)
-        .iter()
-        .map(|r| r.to_string())
-        .collect()
+    use std::collections::HashSet;
+
+    let mut visited: HashSet<&'static str> = HashSet::new();
+    let mut stack: Vec<&'static str> = Vec::new();
+
+    for &r in get_inherited_roles(role_name) {
+        stack.push(r);
+    }
+
+    while let Some(r) = stack.pop() {
+        if !visited.insert(r) {
+            continue;
+        }
+        for &rr in get_inherited_roles(r) {
+            stack.push(rr);
+        }
+    }
+
+    let mut out: Vec<String> = visited.into_iter().map(|r| r.to_string()).collect();
+    out.sort();
+    out
 }
 
 /// Returns `true` if `role_name` is authorised to perform the action that
 /// requires `required_role`, either because the roles match exactly or because
 /// `required_role` appears in the inherited permissions of `role_name`.
 pub fn has_permission(role_name: &str, required_role: &str) -> bool {
+    if role_name == "the_administrator" {
+        return true;
+    }
     if role_name == required_role {
         return true;
     }
-    get_inherited_roles(role_name).contains(&required_role)
+
+    use std::collections::HashSet;
+
+    let mut visited: HashSet<&'static str> = HashSet::new();
+    let mut stack: Vec<&'static str> = Vec::new();
+
+    for &r in get_inherited_roles(role_name) {
+        if r == required_role {
+            return true;
+        }
+        stack.push(r);
+    }
+
+    while let Some(r) = stack.pop() {
+        if !visited.insert(r) {
+            continue;
+        }
+        if r == required_role {
+            return true;
+        }
+        for &rr in get_inherited_roles(r) {
+            if rr == required_role {
+                return true;
+            }
+            stack.push(rr);
+        }
+    }
+
+    false
 }

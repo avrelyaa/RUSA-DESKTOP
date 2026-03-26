@@ -5,6 +5,7 @@
   import Field from '$lib/components/Field.svelte';
   import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
   import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
   import { governanceApi, userApi, generalApi, adminApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
   import { onMount, onDestroy } from 'svelte';
@@ -25,8 +26,8 @@
 
   const role = $derived($session?.role_name ?? '');
   const tier = $derived($session?.tier ?? 0);
-  const isNomad = $derived(role === 'the_nomad');
-  const isLibrarian = $derived(role === 'the_librarian');
+  const isNomad = $derived(canPerform($session, 'the_nomad'));
+  const isLibrarian = $derived(canPerform($session, 'the_librarian'));
   const isDirectorOrAbove = $derived(tier >= 3);
   const isAdministrator = $derived(role === 'the_administrator');
 
@@ -137,16 +138,16 @@
         generalApi.getGeneralRequests(s.token),
       ]);
       [votes, meetings, relocations, events, generalRequests] = base;
-      if (s.role_name === 'the_nomad') {
+      if (canPerform(s, 'the_nomad')) {
         nomadTasks = await governanceApi.getNomadTasks(s.token);
         allUsers = await userApi.getAll(s.token);
       }
-      if (s.role_name === 'the_librarian') {
+      if (canPerform(s, 'the_librarian')) {
         try { archivePermissions = await governanceApi.getArchivePermissions(s.token); } catch {}
       }
       if (s.tier >= 3) {
         allRoles = await userApi.getRoles(s.token);
-        if (s.role_name !== 'the_nomad') allUsers = await userApi.getAll(s.token);
+        if (!canPerform(s, 'the_nomad')) allUsers = await userApi.getAll(s.token);
       }
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;

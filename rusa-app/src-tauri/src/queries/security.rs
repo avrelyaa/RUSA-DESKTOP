@@ -1,4 +1,5 @@
 use crate::db::get_db;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -33,6 +34,8 @@ pub struct BroadcastRequestRow {
     pub title: String,
     pub content: Option<String>,
     pub target_audience: Option<String>,
+    pub target_filters: Option<serde_json::Value>,
+    pub routed_to: Option<String>,
     pub status: Option<String>,
     pub requested_by: Option<Uuid>,
     pub reviewed_by: Option<Uuid>,
@@ -140,26 +143,136 @@ pub async fn insert_broadcast_request(
     title: &str,
     content: &str,
     target_audience: Option<&str>,
+    target_filters: Option<serde_json::Value>,
+    routed_to: &str,
     requested_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO broadcast_requests (title, content, target_audience, status, requested_by) VALUES ($1,$2,$3,'pending',$4) RETURNING id",
+        "INSERT INTO broadcast_requests (title, content, target_audience, target_filters, routed_to, status, requested_by) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id",
     )
     .bind(title)
     .bind(content)
     .bind(target_audience)
+    .bind(target_filters)
+    .bind(routed_to)
     .bind(requested_by)
     .fetch_one(get_db())
     .await?;
     Ok(row.0)
 }
 
-pub async fn get_all_broadcast_requests() -> Result<Vec<BroadcastRequestRow>, sqlx::Error> {
+pub async fn get_broadcast_requests(routed_to_role: Option<&str>) -> Result<Vec<BroadcastRequestRow>, sqlx::Error> {
+    let mut query = "SELECT id, title, content, target_audience, target_filters, routed_to, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE deleted_at IS NULL".to_string();
+    
+    if routed_to_role.is_some() {
+        query.push_str(" AND routed_to = $1");
+    }
+    
+    query.push_str(" ORDER BY created_at DESC");
+
+    let mut q = sqlx::query_as::<_, BroadcastRequestRow>(&query);
+    if let Some(role) = routed_to_role {
+        q = q.bind(role);
+    }
+    
+    q.fetch_all(get_db()).await
+}
+
+pub async fn get_broadcast_request_by_id(request_id: Uuid) -> Result<Option<BroadcastRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, BroadcastRequestRow>(
-        "SELECT id, title, content, target_audience, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, content, target_audience, target_filters, routed_to, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE id = $1 AND deleted_at IS NULL",
     )
-    .fetch_all(get_db())
+    .bind(request_id)
+    .fetch_optional(get_db())
     .await
+}
+
+pub async fn resolve_broadcast_targets(
+    target_filters: Option<&serde_json::Value>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    #[derive(sqlx::FromRow)]
+    struct UserIdRow {
+        id: Uuid,
+    }
+
+    let mut set: HashSet<Uuid> = HashSet::new();
+
+    let mut personnel_ids: Vec<Uuid> = Vec::new();
+    let mut departments: Vec<String> = Vec::new();
+    let mut locations: Vec<String> = Vec::new();
+
+    if let Some(filters) = target_filters {
+        if let Some(arr) = filters.get("personnel").and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    if let Ok(id) = Uuid::parse_str(s) {
+                        personnel_ids.push(id);
+                    }
+                }
+            }
+        }
+        if let Some(arr) = filters.get("departments").and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    let t = s.trim();
+                    if !t.is_empty() {
+                        departments.push(t.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(arr) = filters.get("locations").and_then(|v| v.as_array()) {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    let t = s.trim();
+                    if !t.is_empty() {
+                        locations.push(t.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let has_any_filter = !personnel_ids.is_empty() || !departments.is_empty() || !locations.is_empty();
+
+    if !has_any_filter {
+        let rows = sqlx::query_as::<_, UserIdRow>(
+            "SELECT id FROM users WHERE deleted_at IS NULL AND is_active = true",
+        )
+        .fetch_all(get_db())
+        .await?;
+        return Ok(rows.into_iter().map(|r| r.id).collect());
+    }
+
+    for id in personnel_ids {
+        set.insert(id);
+    }
+
+    if !departments.is_empty() {
+        let rows = sqlx::query_as::<_, UserIdRow>(
+            "SELECT id FROM users WHERE deleted_at IS NULL AND is_active = true AND department = ANY($1)",
+        )
+        .bind(&departments)
+        .fetch_all(get_db())
+        .await?;
+        for r in rows {
+            set.insert(r.id);
+        }
+    }
+
+    if !locations.is_empty() {
+        let rows = sqlx::query_as::<_, UserIdRow>(
+            "SELECT id FROM users WHERE deleted_at IS NULL AND is_active = true AND location = ANY($1)",
+        )
+        .bind(&locations)
+        .fetch_all(get_db())
+        .await?;
+        for r in rows {
+            set.insert(r.id);
+        }
+    }
+
+    Ok(set.into_iter().collect())
 }
 
 pub async fn update_broadcast_request_review(
