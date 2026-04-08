@@ -38,8 +38,8 @@ export const researchApi = {
     invoke<string>('propose_experiment', { token, title, description, experimentType, startDate, endDate }),
   reviewExperiment: (token: string, experimentId: string, status: string, notes?: string) =>
     invoke<void>('review_experiment', { token, experimentId, status, notes }),
-  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, linkedTestIds?: string, notes?: string) =>
-    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, linkedTestIds, notes }),
+  addLog: (token: string, experimentId: string, logDate: string, personnelPresent?: string, speciesMatterTested?: string, testsPerformed?: string, linkedTestIds?: string, notes?: string, testOutcome?: string, personnelIds?: string, attachments?: string) =>
+    invoke<string>('add_experiment_log', { token, experimentId, logDate, personnelPresent, speciesMatterTested, testsPerformed, linkedTestIds, notes, testOutcome, personnelIds, attachments }),
   getExperimentLogs: (token: string, experimentId: string) =>
     invoke<any[]>('get_experiment_logs', { token, experimentId }),
   requestConclusion: (token: string, experimentId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
@@ -66,6 +66,16 @@ export const researchApi = {
     invoke<any[]>('get_experiment_tasks', { token, experimentId }),
 };
 
+// Chemistry Department
+export const chemistryApi = {
+  getMatterArchive: (token: string) => invoke<any[]>('get_matter_archive', { token }),
+  addChemistryLog: (token: string, experimentId: string, logDate: string, linkedTestId: string, testOutcome: string, personnelIds?: string, attachments?: string, notes?: string) =>
+    invoke<string>('add_chemistry_log', { token, experimentId, logDate, linkedTestId, testOutcome, personnelIds, attachments, notes }),
+  approveChemistryConclusion: (token: string, experimentId: string, decision: string, matterName: string, matterClassification?: string, matterType?: string, matterProperties?: string, reviewNotes?: string) =>
+    invoke<void>('approve_chemistry_conclusion', { token, experimentId, decision, matterName, matterClassification, matterType, matterProperties, reviewNotes }),
+  getChemistryObserverDashboard: (token: string) => invoke<any>('get_chemistry_observer_dashboard', { token }),
+};
+
 // Data Services
 export const dataApi = {
   submitRequest: (token: string, payload: {
@@ -82,14 +92,14 @@ export const dataApi = {
     invoke<string>('submit_data_request', {
       token,
       title: payload.title,
-      requested_data_items: payload.requestedDataItems,
-      reason_of_request: payload.reasonOfRequest,
+      requestedDataItems: payload.requestedDataItems,
+      reasonOfRequest: payload.reasonOfRequest,
       description: payload.description,
-      data_type: payload.dataType,
-      requester_location: payload.requesterLocation,
-      requester_tel_fax: payload.requesterTelFax,
-      requester_department: payload.requesterDepartment,
-      requester_department_email: payload.requesterDepartmentEmail
+      dataType: payload.dataType,
+      requesterLocation: payload.requesterLocation,
+      requesterTelFax: payload.requesterTelFax,
+      requesterDepartment: payload.requesterDepartment,
+      requesterDepartmentEmail: payload.requesterDepartmentEmail
     }),
   getRequests: (token: string) => invoke<any[]>('get_data_requests', { token }),
   review: (token: string, requestId: string, status: string, notes?: string, assignedTo?: string) =>
@@ -156,6 +166,16 @@ export const securityApi = {
   submitExternalReport: (token: string, title: string, description: string, securityType?: string) =>
     invoke<string>('submit_external_report', { token, title, description, securityType }),
   getExternalReports: (token: string) => invoke<any[]>('get_external_reports', { token }),
+};
+
+export const researchSecurityApi = {
+  submitReport: (token: string, title: string, category: string, description: string, severity: string, relatedExperimentId?: string, relatedTaskId?: string, attachments?: any) =>
+    invoke<string>('submit_security_report', { token, title, category, description, severity, relatedExperimentId, relatedTaskId, attachments }),
+  getReports: (token: string) => invoke<any[]>('get_security_reports', { token }),
+  acknowledgeReport: (token: string, reportId: string, notes?: string) =>
+    invoke<void>('acknowledge_security_report', { token, reportId, notes }),
+  updateReportStatus: (token: string, reportId: string, status: string, notes?: string) =>
+    invoke<void>('update_security_report_status', { token, reportId, status, notes }),
 };
 
 // Astronautics
@@ -419,6 +439,12 @@ export const aerospaceApi = {
   getHelpRequests: (token: string) => invoke<any[]>('get_help_requests', { token }),
   resolveHelpRequest: (token: string, requestId: string, status: string, response?: string) =>
     invoke<void>('resolve_help_request', { token, requestId, status, response }),
+  rejectHelpRequest: (token: string, requestId: string, rejectionReason: string) =>
+    invoke<void>('reject_help_request', { token, requestId, rejectionReason }),
+  approveHelpRequest: (token: string, requestId: string, assignedToId: string) =>
+    invoke<string>('approve_help_request', { token, requestId, assignedToId }),
+  proxyDeliverTaskResponse: (token: string, requestId: string, response: string) =>
+    invoke<void>('proxy_deliver_task_response', { token, requestId, response }),
 };
 
 // Admin
@@ -444,6 +470,12 @@ export const researchTaskApi = {
     invoke<void>('submit_research_task_result', { token, taskId, resultNotes }),
   complete: (token: string, taskId: string) =>
     invoke<void>('complete_research_task', { token, taskId }),
+  updateStatus: (token: string, taskId: string, status: string, progressNotes?: string) =>
+    invoke<void>('update_research_task_status', { token, taskId, status, progressNotes }),
+  requestConclusion: (token: string, taskId: string, finalNotes: string, finalFindings?: string, methodologySummary?: string, keyResults?: string, recommendations?: string, limitations?: string) =>
+    invoke<void>('request_research_task_conclusion', { token, taskId, finalNotes, finalFindings, methodologySummary, keyResults, recommendations, limitations }),
+  reviewConclusion: (token: string, taskId: string, decision: string, reviewNotes?: string) =>
+    invoke<void>('review_research_task_conclusion', { token, taskId, decision, reviewNotes }),
 };
 
 // Types

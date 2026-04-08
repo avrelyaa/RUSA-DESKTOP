@@ -158,6 +158,10 @@ pub fn run() {
             commands::security_commands::update_security_task_status,
             commands::security_commands::submit_external_report,
             commands::security_commands::get_external_reports,
+            commands::security_commands::submit_security_report,
+            commands::security_commands::get_security_reports,
+            commands::security_commands::acknowledge_security_report,
+            commands::security_commands::update_security_report_status,
             // astronaut
             commands::astronaut_commands::get_missions,
             commands::astronaut_commands::create_mission,
@@ -220,6 +224,9 @@ pub fn run() {
             commands::aerospace_commands::submit_help_request,
             commands::aerospace_commands::get_help_requests,
             commands::aerospace_commands::resolve_help_request,
+            commands::aerospace_commands::reject_help_request,
+            commands::aerospace_commands::approve_help_request,
+            commands::aerospace_commands::proxy_deliver_task_response,
             // station
             commands::station_commands::get_stations,
             commands::station_commands::get_station_inventory,
@@ -313,11 +320,19 @@ pub fn run() {
             commands::admin_commands::terminate_personnel,
             commands::admin_commands::get_audit_log,
             commands::admin_commands::override_vote,
+            // chemistry
+            commands::chemistry_commands::get_matter_archive,
+            commands::chemistry_commands::add_chemistry_log,
+            commands::chemistry_commands::approve_chemistry_conclusion,
+            commands::chemistry_commands::get_chemistry_observer_dashboard,
             // research tasks
             commands::research_task_commands::assign_research_task,
             commands::research_task_commands::get_research_tasks,
             commands::research_task_commands::submit_research_task_result,
             commands::research_task_commands::complete_research_task,
+            commands::research_task_commands::update_research_task_status,
+            commands::research_task_commands::request_research_task_conclusion,
+            commands::research_task_commands::review_research_task_conclusion,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

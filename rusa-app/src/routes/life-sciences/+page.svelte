@@ -1,0 +1,1188 @@
+<script lang="ts">
+  import PageShell from '$lib/components/PageShell.svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import Table from '$lib/components/Table.svelte';
+  import Field from '$lib/components/Field.svelte';
+  import WorkspaceList from '$lib/components/WorkspaceList.svelte';
+  import UserAutocompleteSingle from '$lib/components/UserAutocompleteSingle.svelte';
+  import { session } from '$lib/stores/auth';
+  import { canPerform } from '$lib/stores/permissions';
+  import { researchApi, researchTaskApi, userApi, aerospaceApi, researchSecurityApi } from '$lib/api';
+  import { showToast } from '$lib/stores/toast';
+  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
+
+  type Tab = 'experiments' | 'species' | 'tests' | 'research_tasks' | 'pending_conclusions' | 'observer_dashboard' | 'help_requests' | 'security_reports';
+  let activeTab = $state<Tab>('experiments');
+
+  let experiments: any[] = $state([]);
+  let species: any[] = $state([]);
+  let tests: any[] = $state([]);
+  let researchTasks: any[] = $state([]);
+  let loading = $state(false);
+
+  // Experiment form
+  let expOpen = $state(false);
+  let expTitle = $state('');
+  let expDesc = $state('');
+  let expStart = $state('');
+  let expEnd = $state('');
+
+  // Species form
+  let speciesOpen = $state(false);
+  let speciesName = $state('');
+  let speciesClass = $state('');
+  let speciesDesc = $state('');
+  let speciesHabitat = $state('');
+  let speciesCategory = $state('unknown');
+
+  // Help request form (research/biological/agricultural engineers)
+  let helpReqOpen = $state(false);
+  let hrTitle = $state('');
+  let hrDesc = $state('');
+  let hrCategory = $state('');
+  let helpRequests: any[] = $state([]);
+  let helpResolveOpen = $state(false);
+  let helpResolveTarget: any = $state(null);
+  let helpResolveStatus = $state('in_review');
+  let helpResolveResponse = $state('');
+
+  // Help request reject modal (director)
+  let helpRejectOpen = $state(false);
+  let helpRejectTarget: any = $state(null);
+  let helpRejectReason = $state('');
+
+  // Help request approve modal (director — convert to task)
+  let helpApproveOpen = $state(false);
+  let helpApproveTarget: any = $state(null);
+  let helpApproveAssignee: any = $state(null);
+
+  // Help request deliver response modal (director — proxy deliver)
+  let helpDeliverOpen = $state(false);
+  let helpDeliverTarget: any = $state(null);
+  let helpDeliverResponse = $state('');
+
+  // Test form
+  let testOpen = $state(false);
+  let testTitle = $state('');
+  let testDesc = $state('');
+  let testMethod = $state('');
+
+  // Review form
+  let reviewOpen = $state(false);
+  let reviewTarget: any = $state(null);
+  let reviewType = $state<'experiment' | 'test'>('experiment');
+  let reviewStatus = $state('');
+  let reviewNotes = $state('');
+
+  // Assign research task form
+  let assignTaskOpen = $state(false);
+  let rtTitle = $state('');
+  let rtDesc = $state('');
+  let rtDue = $state('');
+
+  let allUsers: any[] = $state([]);
+  let assigneeSelected: any = $state(null);
+
+  // Submit result form
+  let resultOpen = $state(false);
+  let selectedTask: any = $state(null);
+  let resultNotes = $state('');
+
+  // Conclusion request/review, log, and experiment task assignment moved to /experiments/[id] detail page
+
+  // Observer dashboard data
+  let observerDashboard: any = $state(null);
+  let observerDashboardLoading = $state(false);
+
+  const canAssignResearchTasks = $derived(
+    canPerform($session, 'the_observer') ||
+    canPerform($session, 'the_artificer') ||
+    canPerform($session, 'the_taskmaster')
+  );
+
+  const myResearchTasks = $derived(researchTasks.filter((t: any) => t.assigned_to === $session?.user_id));
+  const assignedByMeResearchTasks = $derived(researchTasks.filter((t: any) => t.assigned_by === $session?.user_id && t.assigned_to !== $session?.user_id));
+
+  const isTaskmaster = $derived(canPerform($session, 'the_taskmaster'));
+  const isObserver = $derived(canPerform($session, 'the_observer'));
+  const isResearchEngineer = $derived(
+    canPerform($session, 'biological_engineer') ||
+    canPerform($session, 'agricultural_engineer')
+  );
+  const isAgriculturalEngineer = $derived(canPerform($session, 'agricultural_engineer'));
+
+  const canReviewExperiment = $derived(
+    $session?.role_name === 'the_observer' ||
+    $session?.role_name === 'the_taskmaster' ||
+    ($session?.tier ?? 0) >= 3
+  );
+
+  const pendingConclusions = $derived(experiments.filter((e: any) => e.status === 'conclusion_requested'));
+
+  // Status filter for experiments master list
+  let expStatusFilter = $state<string>('all');
+  const filteredExperiments = $derived(
+    expStatusFilter === 'all'
+      ? experiments
+      : experiments.filter((e: any) => e.status === expStatusFilter)
+  );
+  const workspaceStatusFilters = [
+    { value: 'all', label: 'All' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'conclusion_requested', label: 'Conclusion Requested' },
+    { value: 'completed', label: 'Completed' },
+    { value: 'rejected', label: 'Rejected' },
+  ];
+  let helpStatusFilter = $state<string>('all');
+  const filteredHelpRequests = $derived(
+    helpStatusFilter === 'all'
+      ? helpRequests
+      : helpRequests.filter((r: any) => r.status === helpStatusFilter)
+  );
+
+  // Security reports
+  let securityReports: any[] = $state([]);
+  let secReportOpen = $state(false);
+  let secTitle = $state('');
+  let secCategory = $state('Equipment Damage');
+  let secDesc = $state('');
+  let secSeverity = $state('low');
+  let secReportFilter = $state('all');
+  const filteredSecurityReports = $derived(
+    secReportFilter === 'all' ? securityReports : securityReports.filter((r: any) => r.status === secReportFilter)
+  );
+  let secSeverityFilter = $state('all');
+  const visibleSecurityReports = $derived(
+    filteredSecurityReports.filter((r: any) => secSeverityFilter === 'all' || (r.severity ?? '').toLowerCase() === secSeverityFilter)
+  );
+  let secRelatedExperimentId = $state('');
+  let secRelatedTaskId = $state('');
+  let secAttachmentFiles = $state<File[]>([]);
+
+  function getUserName(userId: string | undefined | null): string {
+    if (!userId) return '—';
+    const u = allUsers.find((u: any) => u.id === userId);
+    return u ? (u.full_name ?? u.username ?? userId) : userId;
+  }
+
+  onMount(async () => {
+    const s = $session;
+    if (!s) return;
+    loading = true;
+    try {
+      [experiments, species, tests, researchTasks, helpRequests, securityReports] = await Promise.all([
+        researchApi.getExperiments(s.token),
+        researchApi.getSpeciesArchive(s.token),
+        researchApi.getTestArchive(s.token),
+        researchTaskApi.getTasks(s.token),
+        aerospaceApi.getHelpRequests(s.token),
+        researchSecurityApi.getReports(s.token),
+      ]);
+      experiments = experiments.filter((e: any) => e.experiment_type === 'new_species');
+      allUsers = await userApi.getAll(s.token);
+    } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
+    loading = false;
+  });
+
+  async function proposeExperiment() {
+    const s = $session; if (!s) return;
+    if (!expTitle || !expDesc) { showToast('Title and description required', 'error'); return; }
+    try {
+      await researchApi.proposeExperiment(s.token, expTitle, expDesc, 'new_species', expStart ? expStart + 'T00:00:00Z' : undefined, expEnd ? expEnd + 'T00:00:00Z' : undefined);
+      showToast('Experiment proposed', 'success');
+      expOpen = false; expTitle = ''; expDesc = ''; expStart = ''; expEnd = '';
+      const all = await researchApi.getExperiments(s.token);
+      experiments = all.filter((e: any) => e.experiment_type === 'new_species');
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function addSpecies() {
+    const s = $session; if (!s) return;
+    if (!speciesName) { showToast('Name required', 'error'); return; }
+    try {
+      await researchApi.addSpecies(s.token, speciesName, speciesClass || undefined, speciesDesc || undefined, speciesHabitat || undefined, speciesCategory || undefined);
+      showToast('Species added', 'success');
+      speciesOpen = false; speciesName = ''; speciesClass = ''; speciesDesc = ''; speciesHabitat = ''; speciesCategory = 'unknown';
+      species = await researchApi.getSpeciesArchive(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function proposeTest() {
+    const s = $session; if (!s) return;
+    if (!testTitle) { showToast('Title required', 'error'); return; }
+    try {
+      await researchApi.proposeTest(s.token, testTitle, testDesc || undefined, testMethod || undefined);
+      showToast('Test proposed', 'success');
+      testOpen = false; testTitle = ''; testDesc = ''; testMethod = '';
+      tests = await researchApi.getTestArchive(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openReview(item: any, type: 'experiment' | 'test') {
+    reviewTarget = item; reviewType = type; reviewStatus = ''; reviewNotes = ''; reviewOpen = true;
+  }
+
+  async function submitReview() {
+    const s = $session; if (!s || !reviewTarget) return;
+    if (!reviewStatus) { showToast('Status required', 'error'); return; }
+    if (reviewType === 'test' && reviewStatus !== 'approved' && reviewStatus !== 'rejected') {
+      showToast('Test proposals can only be approved or rejected', 'error');
+      return;
+    }
+    try {
+      if (reviewType === 'experiment') {
+        await researchApi.reviewExperiment(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
+        experiments = await researchApi.getExperiments(s.token);
+      } else {
+        await researchApi.reviewTest(s.token, reviewTarget.id, reviewStatus, reviewNotes || undefined);
+        tests = await researchApi.getTestArchive(s.token);
+      }
+      showToast('Review submitted', 'success'); reviewOpen = false;
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function assignResearchTask() {
+    const s = $session; if (!s) return;
+    if (!assigneeSelected || !rtTitle) { showToast('Assignee and title required', 'error'); return; }
+    try {
+      await researchTaskApi.assign(s.token, rtTitle, rtDesc || undefined, assigneeSelected.id, undefined, rtDue || undefined);
+      showToast('Research task assigned', 'success');
+      assignTaskOpen = false; assigneeSelected = null; rtTitle = ''; rtDesc = ''; rtDue = '';
+      researchTasks = await researchTaskApi.getTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openResultModal(task: any) {
+    selectedTask = task;
+    resultNotes = task.result_notes ?? '';
+    resultOpen = true;
+  }
+
+  async function submitResult() {
+    const s = $session; if (!s || !selectedTask) return;
+    if (!resultNotes) { showToast('Result notes required', 'error'); return; }
+    try {
+      await researchTaskApi.submitResult(s.token, selectedTask.id, resultNotes);
+      showToast('Result submitted', 'success');
+      resultOpen = false;
+      researchTasks = await researchTaskApi.getTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function completeTask(task: any) {
+    const s = $session; if (!s) return;
+    try {
+      await researchTaskApi.complete(s.token, task.id);
+      showToast('Task marked complete', 'success');
+      researchTasks = await researchTaskApi.getTasks(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function loadObserverDashboard() {
+    const s = $session; if (!s) return;
+    observerDashboardLoading = true;
+    try {
+      observerDashboard = await researchApi.getObserverDashboard(s.token);
+    } catch (e: any) { showToast('Failed to load dashboard: ' + e, 'error'); }
+    observerDashboardLoading = false;
+  }
+
+  $effect(() => {
+    if (activeTab === 'observer_dashboard' && isObserver && !observerDashboard) {
+      loadObserverDashboard();
+    }
+  });
+
+  async function submitHelpRequest() {
+    const s = $session; if (!s) return;
+    if (!hrTitle) { showToast('Title required', 'error'); return; }
+    try {
+      await aerospaceApi.submitHelpRequest(s.token, hrTitle, hrDesc || undefined, hrCategory || undefined);
+      showToast('Help request submitted', 'success');
+      helpReqOpen = false; hrTitle = ''; hrDesc = ''; hrCategory = '';
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpResolve(req: any) {
+    helpResolveTarget = req;
+    helpResolveStatus = 'in_review';
+    helpResolveResponse = '';
+    helpResolveOpen = true;
+  }
+
+  async function submitHelpResolve() {
+    const s = $session; if (!s || !helpResolveTarget) return;
+    try {
+      await aerospaceApi.resolveHelpRequest(s.token, helpResolveTarget.id, helpResolveStatus, helpResolveResponse || undefined);
+      showToast('Help request updated', 'success');
+      helpResolveOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpReject(req: any) {
+    helpRejectTarget = req;
+    helpRejectReason = '';
+    helpRejectOpen = true;
+  }
+
+  async function submitHelpReject() {
+    const s = $session; if (!s || !helpRejectTarget) return;
+    if (!helpRejectReason.trim()) { showToast('Rejection reason is required', 'error'); return; }
+    try {
+      await aerospaceApi.rejectHelpRequest(s.token, helpRejectTarget.id, helpRejectReason);
+      showToast('Help request rejected', 'success');
+      helpRejectOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpApprove(req: any) {
+    helpApproveTarget = req;
+    helpApproveAssignee = null;
+    helpApproveOpen = true;
+  }
+
+  async function submitHelpApprove() {
+    const s = $session; if (!s || !helpApproveTarget) return;
+    if (!helpApproveAssignee) { showToast('Select a subordinate to assign the task to', 'error'); return; }
+    try {
+      await aerospaceApi.approveHelpRequest(s.token, helpApproveTarget.id, helpApproveAssignee.id);
+      showToast('Help request approved — task created', 'success');
+      helpApproveOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function openHelpDeliver(req: any) {
+    helpDeliverTarget = req;
+    helpDeliverResponse = '';
+    helpDeliverOpen = true;
+  }
+
+  async function submitHelpDeliver() {
+    const s = $session; if (!s || !helpDeliverTarget) return;
+    if (!helpDeliverResponse.trim()) { showToast('Response is required', 'error'); return; }
+    try {
+      await aerospaceApi.proxyDeliverTaskResponse(s.token, helpDeliverTarget.id, helpDeliverResponse);
+      showToast('Response delivered to original requester', 'success');
+      helpDeliverOpen = false;
+      helpRequests = await aerospaceApi.getHelpRequests(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  async function submitSecurityReport() {
+    const s = $session; if (!s) return;
+    if (!secTitle.trim()) { showToast('Title is required', 'error'); return; }
+    if (!secDesc.trim()) { showToast('Description is required', 'error'); return; }
+    try {
+      const attachments = secAttachmentFiles.length > 0
+        ? secAttachmentFiles.map((f) => ({ name: f.name, size: f.size, type: f.type }))
+        : undefined;
+      await researchSecurityApi.submitReport(
+        s.token,
+        secTitle,
+        secCategory,
+        secDesc,
+        secSeverity,
+        secRelatedExperimentId.trim() || undefined,
+        secRelatedTaskId.trim() || undefined,
+        attachments,
+      );
+      showToast('Security report submitted', 'success');
+      secReportOpen = false;
+      secTitle = '';
+      secCategory = 'Equipment Damage';
+      secDesc = '';
+      secSeverity = 'low';
+      secRelatedExperimentId = '';
+      secRelatedTaskId = '';
+      secAttachmentFiles = [];
+      securityReports = await researchSecurityApi.getReports(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
+
+  function secStatusBadgeClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'acknowledged': return 'badge badge-progress';
+      case 'investigating': return 'badge badge-conclude';
+      case 'resolved': return 'badge badge-done';
+      case 'closed': return 'badge badge-rejected';
+      default: return 'badge badge-open';
+    }
+  }
+
+  function secSeverityBadgeClass(severity: string | null | undefined): string {
+    switch ((severity ?? '').toLowerCase()) {
+      case 'critical': return 'badge badge-critical';
+      case 'high': return 'badge badge-high';
+      case 'medium': return 'badge badge-medium';
+      default: return 'badge badge-low';
+    }
+  }
+
+  function statusBadgeClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'pending': return 'badge badge-open';
+      case 'result_submitted': return 'badge badge-progress';
+      case 'completed': return 'badge badge-done';
+      default: return 'badge';
+    }
+  }
+
+  function expStatusBadgeClass(status: string | null | undefined): string {
+    switch (status) {
+      case 'pending': return 'badge-open';
+      case 'approved': return 'badge-approved';
+      case 'in_progress': return 'badge-progress';
+      case 'conclusion_requested': return 'badge-conclude';
+      case 'completed': return 'badge-done';
+      case 'rejected': return 'badge-rejected';
+      case 'cancelled': return 'badge-rejected';
+      default: return '';
+    }
+  }
+
+  const expCols = [
+    { key: 'title', label: 'Title' },
+    { key: 'experiment_type', label: 'Type' },
+    { key: 'status', label: 'Status' },
+    { key: 'start_date', label: 'Start Date' },
+  ];
+  const speciesCols = [
+    { key: 'name', label: 'Name' },
+    { key: 'classification', label: 'Classification' },
+    { key: 'habitat', label: 'Habitat' },
+    { key: 'approval_status', label: 'Status' },
+  ];
+  const testCols = [
+    { key: 'title', label: 'Title' },
+    { key: 'status', label: 'Status' },
+    { key: 'methodology', label: 'Methodology' },
+  ];
+  const reviewStatusOpts = [
+    { value: 'approved', label: 'Approved' },
+    { value: 'rejected', label: 'Rejected' },
+    { value: 'in_progress', label: 'Approve & Start' },
+  ];
+  const helpResolveOpts = [
+    { value: 'in_review', label: 'In Review' },
+    { value: 'closed', label: 'Closed' },
+  ];
+  const speciesCategoryOpts = [
+    { value: 'unknown', label: 'Unknown' },
+    { value: 'plant', label: 'Plant' },
+    { value: 'animal', label: 'Animal' },
+    { value: 'microorganism', label: 'Microorganism' },
+    { value: 'fungus', label: 'Fungus' },
+    { value: 'other', label: 'Other' },
+  ];
+  const secCategoryOpts = [
+    { value: 'Equipment Damage', label: 'Equipment Damage' },
+    { value: 'Safety Violation', label: 'Safety Violation' },
+    { value: 'Unauthorized Access', label: 'Unauthorized Access' },
+    { value: 'Data Breach', label: 'Data Breach' },
+    { value: 'Other', label: 'Other' },
+  ];
+  const secSeverityOpts = [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
+  const secStatusFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'new', label: 'New' },
+    { value: 'acknowledged', label: 'Acknowledged' },
+    { value: 'investigating', label: 'Investigating' },
+    { value: 'resolved', label: 'Resolved' },
+    { value: 'closed', label: 'Closed' },
+  ];
+  const secSeverityFilterOpts = [
+    { value: 'all', label: 'All' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'critical', label: 'Critical' },
+  ];
+  const isDirector = $derived(($session?.tier ?? 0) >= 3);
+</script>
+
+<svelte:head><title>RUSA IMS — Life Sciences</title></svelte:head>
+
+<PageShell title="Life Sciences" subtitle="New species experiments, species archive, test proposals, and research tasks">
+  <div class="tabs">
+    <button class="tab" class:active={activeTab==='experiments'} onclick={() => activeTab='experiments'}>Experiments</button>
+    <button class="tab" class:active={activeTab==='species'} onclick={() => activeTab='species'}>Species Archive</button>
+    <button class="tab" class:active={activeTab==='tests'} onclick={() => activeTab='tests'}>Test Archive</button>
+    <button class="tab" class:active={activeTab==='research_tasks'} onclick={() => activeTab='research_tasks'}>
+      {canAssignResearchTasks ? 'Research Tasks' : 'My Research Tasks'}
+    </button>
+    {#if isTaskmaster}
+      <button class="tab" class:active={activeTab==='pending_conclusions'} onclick={() => activeTab='pending_conclusions'}>
+        Pending Conclusions {#if pendingConclusions.length > 0}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
+      </button>
+    {/if}
+    {#if isObserver}
+      <button class="tab" class:active={activeTab==='observer_dashboard'} onclick={() => activeTab='observer_dashboard'}>
+        Observer Dashboard
+      </button>
+    {/if}
+    <button class="tab" class:active={activeTab==='help_requests'} onclick={() => activeTab='help_requests'}>
+      Help Requests {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}<span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>{/if}
+    </button>
+    <button class="tab" class:active={activeTab==='security_reports'} onclick={() => activeTab='security_reports'}>
+      Security Reports
+    </button>
+  </div>
+
+  {#if loading}
+    <p class="loading">Loading...</p>
+  {:else if activeTab === 'experiments'}
+    <div class="section-bar">
+      <h2 class="section-title">Experiments</h2>
+      <button class="btn-primary" onclick={() => expOpen = true}>+ Propose Experiment</button>
+    </div>
+    <WorkspaceList
+      items={filteredExperiments}
+      totalCount={experiments.length}
+      filters={workspaceStatusFilters}
+      selectedFilter={expStatusFilter}
+      onSelectFilter={(v) => expStatusFilter = v}
+      onItemClick={(exp) => goto(`/experiments/${exp.id}`)}
+      getTitle={(exp) => exp.title}
+      getStatusLabel={(exp) => exp.status ?? '—'}
+      getStatusClass={(exp) => expStatusBadgeClass(exp.status)}
+      getTags={(exp) => [
+        ...(exp.experiment_type ? [`🔬 ${exp.experiment_type}`] : []),
+        ...(exp.start_date ? [`📅 ${new Date(exp.start_date).toLocaleDateString()}`] : [])
+      ]}
+      getBadges={(exp) => exp.conclusion_approved ? [{ label: 'Concluded', className: 'badge-done' }] : []}
+      emptyMessage="No experiments yet."
+      emptyFilteredMessage="No experiments match the selected filter."
+    />
+  {:else if activeTab === 'species'}
+    <div class="section-bar">
+      <h2 class="section-title">
+        Species Archive
+        {#if isAgriculturalEngineer}
+          <span class="plant-only-badge">🌿 Plants Only</span>
+        {/if}
+      </h2>
+      <button class="btn-primary" onclick={() => { speciesCategory = isAgriculturalEngineer ? 'plant' : 'unknown'; speciesOpen = true; }}>+ Add Species</button>
+    </div>
+    {#if isAgriculturalEngineer}
+      <p class="access-note">⚠️ Agricultural engineers have access to <strong>plant species only</strong>. New species are pre-categorized as plants.</p>
+    {/if}
+    {#if species.length === 0}
+      <p class="empty">No species in archive.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Category</th>
+              <th>Classification</th>
+              <th>Habitat</th>
+              <th>Archive Status</th>
+              <th>Discovery Experiment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each species as sp}
+              <tr>
+                <td>{sp.name}</td>
+                <td>
+                  {#if sp.species_category && sp.species_category !== 'unknown'}
+                    <span class="species-cat-badge species-cat-{sp.species_category}">{sp.species_category}</span>
+                  {:else}
+                    <span class="badge">—</span>
+                  {/if}
+                </td>
+                <td>{sp.classification ?? '—'}</td>
+                <td>{sp.habitat ?? '—'}</td>
+                <td>
+                  {#if sp.approval_status === 'pending_approval'}
+                    <span class="badge badge-conclude">Pending Approval</span>
+                  {:else}
+                    <span class="badge badge-done">{sp.approval_status ?? 'Approved'}</span>
+                  {/if}
+                </td>
+                <td>
+                  {#if sp.discovery_experiment_id}
+                    {experiments.find((e: any) => e.id === sp.discovery_experiment_id)?.title ?? sp.discovery_experiment_id.slice(0,8) + '…'}
+                  {:else}
+                    —
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  {:else if activeTab === 'tests'}
+    <div class="section-bar">
+      <h2 class="section-title">Test Archive</h2>
+      <button class="btn-primary" onclick={() => testOpen = true}>+ Propose Test</button>
+    </div>
+    <Table columns={testCols} rows={tests} onRowClick={(r) => openReview(r, 'test')} />
+  {:else if activeTab === 'research_tasks'}
+    <div class="section-bar">
+      <h2 class="section-title">My Research Tasks</h2>
+      {#if canAssignResearchTasks}
+        <button class="btn-primary" onclick={() => assignTaskOpen = true}>+ Assign Task</button>
+      {/if}
+    </div>
+    {#if myResearchTasks.length === 0}
+      <p class="empty">No research tasks have been assigned to you.</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Due Date</th>
+              <th>Result Notes</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each myResearchTasks as task}
+              <tr>
+                <td>{task.title}</td>
+                <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
+                <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                <td>{task.result_notes ?? '—'}</td>
+                <td>
+                  {#if task.status === 'pending' || task.status === 'in_progress'}
+                    <button class="btn-small" onclick={() => openResultModal(task)}>Submit Result</button>
+                  {/if}
+                  {#if canAssignResearchTasks && task.status === 'result_submitted'}
+                    <button class="btn-small" onclick={() => completeTask(task)}>Mark Complete</button>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+
+    {#if canAssignResearchTasks}
+      <div class="section-bar" style="margin-top: 2rem;">
+        <h2 class="section-title">Tasks I Assigned</h2>
+      </div>
+      {#if assignedByMeResearchTasks.length === 0}
+        <p class="empty">No research tasks assigned yet.</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Due Date</th>
+                <th>Result Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each assignedByMeResearchTasks as task}
+                <tr>
+                  <td>{task.title}</td>
+                  <td><span class={statusBadgeClass(task.status)}>{task.status ?? '—'}</span></td>
+                  <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                  <td>{task.result_notes ?? '—'}</td>
+                  <td>
+                    {#if task.status === 'result_submitted'}
+                      <button class="btn-small" onclick={() => completeTask(task)}>Mark Complete</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    {/if}
+  {:else if activeTab === 'pending_conclusions'}
+    <div class="section-bar">
+      <h2 class="section-title">Pending Experiment Conclusions</h2>
+    </div>
+    {#if pendingConclusions.length === 0}
+      <p class="empty">No experiment conclusions pending approval.</p>
+    {:else}
+      <div class="exp-card-list">
+        {#each pendingConclusions as exp}
+          <button class="exp-card" onclick={() => goto(`/experiments/${exp.id}`)}>
+            <div class="exp-card-header">
+              <span class="exp-card-title">{exp.title}</span>
+              <span class="badge badge-conclude">Conclusion Requested</span>
+            </div>
+            <div class="exp-card-meta">
+              {#if exp.experiment_type}<span class="meta-chip">🔬 {exp.experiment_type}</span>{/if}
+              {#if exp.conclusion_requested_at}<span class="meta-chip">📅 Requested: {new Date(exp.conclusion_requested_at).toLocaleDateString()}</span>{/if}
+              <span class="meta-chip">Approver: {getUserName(exp.reviewed_by)}</span>
+            </div>
+            {#if exp.final_notes}
+              <p class="exp-card-preview">{exp.final_notes.slice(0, 100)}{exp.final_notes.length > 100 ? '…' : ''}</p>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {:else if activeTab === 'observer_dashboard'}
+    <div class="section-bar">
+      <h2 class="section-title">Observer Dashboard</h2>
+      <button class="btn-secondary" onclick={loadObserverDashboard}>↻ Refresh</button>
+    </div>
+    {#if observerDashboardLoading}
+      <p class="loading">Loading dashboard…</p>
+    {:else if observerDashboard}
+      <div class="dashboard-section">
+        <h3 class="subsection-title">Active Experiments</h3>
+        {#if observerDashboard.active_experiments?.length === 0}
+          <p class="empty">No active experiments.</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Days Elapsed</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each observerDashboard.active_experiments as exp}
+                  <tr>
+                    <td>{exp.title}</td>
+                    <td>{exp.experiment_type ?? '—'}</td>
+                    <td><span class="badge {expStatusBadgeClass(exp.status)}">{exp.status ?? '—'}</span></td>
+                    <td>{exp.days_elapsed ?? 0} days</td>
+                    <td>
+                      <button class="btn-small btn-observer" onclick={() => goto(`/experiments/${exp.id}`)}>Open Workspace</button>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+      <div class="dashboard-section">
+        <h3 class="subsection-title">Tasks I've Assigned</h3>
+        {#if observerDashboard.assigned_tasks?.length === 0}
+          <p class="empty">No tasks assigned yet.</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Task Title</th>
+                  <th>Status</th>
+                  <th>Due Date</th>
+                  <th>Experiment</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each observerDashboard.assigned_tasks as task}
+                  <tr>
+                    <td>{task.title}</td>
+                    <td>
+                      <span class="badge {task.status === 'completed' ? 'badge-done' : task.status === 'in_progress' ? 'badge-progress' : 'badge-open'}">{task.status}</span>
+                      {#if task.due_date && new Date(task.due_date) < new Date() && task.status !== 'completed'}
+                        <span class="badge badge-rejected" style="margin-left:4px">Overdue</span>
+                      {/if}
+                    </td>
+                    <td>{task.due_date ? new Date(task.due_date).toLocaleDateString() : '—'}</td>
+                    <td>{observerDashboard.active_experiments?.find((e: any) => e.id === task.experiment_id)?.title ?? '—'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <p class="empty">Dashboard not loaded.</p>
+    {/if}
+
+  {:else if activeTab === 'help_requests'}
+    <div class="section-bar">
+      <h2 class="section-title">Help Requests</h2>
+      {#if isResearchEngineer}
+        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
+      {/if}
+    </div>
+    {#if isResearchEngineer}
+      <p class="access-note">🔀 Help requests are automatically routed to <strong>The Observer</strong> as proxy director.</p>
+    {/if}
+    <WorkspaceList
+      items={filteredHelpRequests}
+      totalCount={helpRequests.length}
+      filters={[
+        { value: 'all', label: 'All' },
+        { value: 'open', label: 'Open' },
+        { value: 'in_review', label: 'In Review' },
+        { value: 'converted', label: 'Converted' },
+        { value: 'resolved', label: 'Resolved' },
+        { value: 'closed', label: 'Closed' },
+        { value: 'rejected', label: 'Rejected' }
+      ]}
+      selectedFilter={helpStatusFilter}
+      onSelectFilter={(v) => helpStatusFilter = v}
+      onItemClick={(req) => goto(`/help-requests/${req.id}`)}
+      getTitle={(req) => req.title}
+      getStatusLabel={(req) => req.status ?? '—'}
+      getStatusClass={(req) => req.status === 'resolved' || req.status === 'closed' ? 'badge-done' : req.status === 'rejected' ? 'badge-rejected' : req.status === 'converted' ? 'badge-progress' : 'badge-open'}
+      getTags={(req) => [
+        ...(req.category ? [`📂 ${req.category}`] : []),
+        ...(req.assigned_proxy_director ? [`👤 ${req.assigned_proxy_director}`] : []),
+        ...(req.created_at ? [`📅 ${new Date(req.created_at).toLocaleDateString()}`] : [])
+      ]}
+      getPreview={(req) => req.status === 'rejected' && req.rejection_reason ? `Rejected: ${req.rejection_reason}` : (req.response ?? '')}
+      emptyMessage="No help requests found."
+      emptyFilteredMessage="No help requests match the selected filter."
+    />
+  {:else if activeTab === 'security_reports'}
+    <div class="section-bar">
+      <h2 class="section-title">Security Reports</h2>
+      {#if canPerform($session, 'biologist') || canPerform($session, 'biological_engineer') || canPerform($session, 'agricultural_engineer')}
+        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Submit Security Report</button>
+      {/if}
+    </div>
+    <p class="access-note">🔒 Reports are routed directly to security staff. Researchers can only view reports they submitted.</p>
+    <div class="table-wrap" style="margin-bottom:0.75rem;">
+      <div class="form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;">
+        <Field label="Status Filter" type="select" bind:value={secReportFilter} options={secStatusFilterOpts} />
+        <Field label="Severity Filter" type="select" bind:value={secSeverityFilter} options={secSeverityFilterOpts} />
+      </div>
+    </div>
+    {#if visibleSecurityReports.length === 0}
+      <p class="empty">{securityReports.length === 0 ? 'No security reports submitted yet.' : 'No reports match the selected filters.'}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Severity</th>
+              <th>Status</th>
+              <th>Related Ref</th>
+              <th>Security Notes</th>
+              <th>Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each visibleSecurityReports as r}
+              <tr>
+                <td>{r.title}</td>
+                <td>{r.category ?? '—'}</td>
+                <td><span class={secSeverityBadgeClass(r.severity)}>{r.severity ?? 'low'}</span></td>
+                <td><span class={secStatusBadgeClass(r.status)}>{r.status ?? 'new'}</span></td>
+                <td>{r.related_experiment_id ?? r.related_task_id ?? '—'}</td>
+                <td class="notes-preview">{r.security_staff_notes ?? '—'}</td>
+                <td>{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  {/if}
+</PageShell>
+
+<Modal bind:open={expOpen} title="Propose Experiment">
+  <div class="form">
+    <Field label="Title" bind:value={expTitle} required />
+    <Field label="Description" type="textarea" bind:value={expDesc} required />
+    <Field label="Start Date" type="date" bind:value={expStart} />
+    <Field label="End Date" type="date" bind:value={expEnd} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => expOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={proposeExperiment}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={speciesOpen} title="Add Species">
+  <div class="form">
+    <Field label="Name" bind:value={speciesName} required />
+    <Field label="Category" type="select" bind:value={speciesCategory} options={speciesCategoryOpts} />
+    <Field label="Classification" bind:value={speciesClass} />
+    <Field label="Description" type="textarea" bind:value={speciesDesc} />
+    <Field label="Habitat" bind:value={speciesHabitat} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => speciesOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={addSpecies}>Add Species</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={testOpen} title="Propose Test">
+  <div class="form">
+    <Field label="Title" bind:value={testTitle} required />
+    <Field label="Description" type="textarea" bind:value={testDesc} />
+    <Field label="Methodology" type="textarea" bind:value={testMethod} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => testOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={proposeTest}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={reviewOpen} title="Review {reviewTarget?.title}">
+  <div class="form">
+    <Field label="Status" type="select" bind:value={reviewStatus} options={reviewType === 'test'
+      ? [
+          { value: '', label: '— Select —' },
+          { value: 'approved', label: 'Approve' },
+          { value: 'rejected', label: 'Reject' }
+        ]
+      : [
+          { value: '', label: '— Select —' },
+          ...reviewStatusOpts
+        ]} required />
+    <Field label="Notes" type="textarea" bind:value={reviewNotes} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitReview}>Submit Review</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={assignTaskOpen} title="Assign Research Task">
+  <div class="form">
+    <div class="field">
+      <label class="field-label">Assign To</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
+    </div>
+    <Field label="Title" bind:value={rtTitle} required />
+    <Field label="Description" type="textarea" bind:value={rtDesc} />
+    <Field label="Due Date" type="datetime-local" bind:value={rtDue} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => { assignTaskOpen = false; assigneeSelected = null; }}>Cancel</button>
+      <button class="btn-primary" onclick={assignResearchTask}>Assign</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={resultOpen} title="Submit Task Result">
+  <div class="form">
+    <p class="info-text">Task: <strong>{selectedTask?.title}</strong></p>
+    <Field label="Result Notes" type="textarea" bind:value={resultNotes} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => resultOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitResult}>Submit</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpReqOpen} title="Send Help Request">
+  <div class="form">
+    <p class="access-note">🔀 This request will be automatically routed to <strong>The Observer</strong> as proxy director.</p>
+    <Field label="Title" bind:value={hrTitle} required />
+    <Field label="Description" type="textarea" bind:value={hrDesc} rows={4} />
+    <Field label="Category (optional)" bind:value={hrCategory} placeholder="e.g. equipment, data, guidance" />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpReqOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpRequest}>Send Help Request</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpResolveOpen} title="Mark Help Request — In Review / Close">
+  <div class="form">
+    {#if helpResolveTarget}
+      <p class="info-text">Request: <strong>{helpResolveTarget.title}</strong></p>
+      {#if helpResolveTarget.description}
+        <p class="info-text">{helpResolveTarget.description}</p>
+      {/if}
+    {/if}
+    <Field label="Status" type="select" bind:value={helpResolveStatus} options={helpResolveOpts} />
+    <Field label="Notes (optional)" type="textarea" bind:value={helpResolveResponse} rows={3} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpResolveOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpResolve}>Update</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpRejectOpen} title="Reject Help Request">
+  <div class="form">
+    {#if helpRejectTarget}
+      <p class="info-text">Request: <strong>{helpRejectTarget.title}</strong></p>
+      {#if helpRejectTarget.description}
+        <p class="info-text">{helpRejectTarget.description}</p>
+      {/if}
+    {/if}
+    <p class="access-note">⚠️ The rejection reason will be immediately visible to the original requester. This action cannot be undone.</p>
+    <Field label="Rejection Reason" type="textarea" bind:value={helpRejectReason} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpRejectOpen = false}>Cancel</button>
+      <button class="btn-danger" onclick={submitHelpReject} disabled={!helpRejectReason.trim()}>Reject Request</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpApproveOpen} title="Approve Help Request — Assign Task">
+  <div class="form">
+    {#if helpApproveTarget}
+      <p class="info-text">Request: <strong>{helpApproveTarget.title}</strong></p>
+      {#if helpApproveTarget.description}
+        <p class="info-text">{helpApproveTarget.description}</p>
+      {/if}
+    {/if}
+    <p class="access-note" style="background:rgba(0,200,83,0.06);border-color:rgba(0,200,83,0.2);color:#00c853">✅ Approving will create an assigned research task for the selected subordinate and mark this request as <strong>converted</strong>.</p>
+    <div class="field">
+      <label class="field-label">Assign Task To</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpApproveOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpApprove} disabled={!helpApproveAssignee}>Approve & Create Task</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={helpDeliverOpen} title="Deliver Task Response">
+  <div class="form">
+    {#if helpDeliverTarget}
+      <p class="info-text">Request: <strong>{helpDeliverTarget.title}</strong></p>
+      {#if helpDeliverTarget.created_task_id}
+        <p class="info-text">Linked Task ID: <code>{helpDeliverTarget.created_task_id}</code></p>
+      {/if}
+    {/if}
+    <p class="access-note">📤 As proxy director, you are officially delivering the completed task result back to the original requester. The request will be marked <strong>resolved</strong>.</p>
+    <Field label="Response / Delivery Notes" type="textarea" bind:value={helpDeliverResponse} rows={4} required />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => helpDeliverOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitHelpDeliver} disabled={!helpDeliverResponse.trim()}>Deliver Response</button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:open={secReportOpen} title="Submit Security Report">
+  <div class="form">
+    <Field label="Title" bind:value={secTitle} required />
+    <Field label="Category" type="select" bind:value={secCategory} options={secCategoryOpts} />
+    <Field label="Description" type="textarea" bind:value={secDesc} rows={4} required />
+    <Field label="Severity" type="select" bind:value={secSeverity} options={secSeverityOpts} />
+    <Field label="Related Experiment ID (optional)" bind:value={secRelatedExperimentId} />
+    <Field label="Related Task ID (optional)" bind:value={secRelatedTaskId} />
+    <div class="field">
+      <span class="field-label">Attachments (optional)</span>
+      <input
+        class="field-input"
+        type="file"
+        multiple
+        onchange={(e) => {
+          const input = e.target as HTMLInputElement;
+          secAttachmentFiles = input.files ? Array.from(input.files) : [];
+        }}
+      />
+      {#if secAttachmentFiles.length > 0}
+        <p class="info-text">{secAttachmentFiles.length} file(s) selected</p>
+      {/if}
+    </div>
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => secReportOpen = false}>Cancel</button>
+      <button class="btn-primary" onclick={submitSecurityReport}>Submit Report</button>
+    </div>
+  </div>
+</Modal>
+
+<style>
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #1e2d4a; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .tab { background: none; border: none; border-bottom: 2px solid transparent; color: #8fa3cc; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; padding: 0.75rem 1.25rem; text-transform: uppercase; transition: all 0.15s; }
+  .tab.active { color: #00d4ff; border-bottom-color: #00d4ff; }
+  .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .section-title { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .subsection-title { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; margin: 1.5rem 0 0.75rem; }
+  .loading { color: #4a5d82; padding: 2rem 0; }
+  .info-text { font-size: 0.85rem; color: #8fa3cc; }
+  .form { display: flex; flex-direction: column; gap: 1rem; }
+  .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
+  .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
+  .btn-small { background: none; border: 1px solid #1e2d4a; border-radius: 3px; color: #8fa3cc; cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.625rem; }
+  .btn-small:hover { border-color: #3d7fff; color: #3d7fff; }
+  .btn-add { border-color: #00c853; color: #00c853; }
+  .btn-add:hover { border-color: #00e676; color: #00e676; }
+  .btn-observer { border-color: #f59e0b; color: #f59e0b; }
+  .btn-observer:hover { border-color: #fbbf24; color: #fbbf24; }
+  .table-wrap { overflow-x: auto; }
+  .data-table { width: 100%; border-collapse: collapse; font-family: 'Outfit', sans-serif; font-size: 0.85rem; }
+  .data-table th { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em; padding: 0.5rem 0.75rem; text-align: left; text-transform: uppercase; border-bottom: 1px solid #1e2d4a; }
+  .data-table td { border-bottom: 1px solid #0d1a2e; color: #c8d8f0; padding: 0.6rem 0.75rem; }
+  .data-table tr:hover td { background: rgba(61,127,255,0.04); }
+  .empty { color: #4a5d82; padding: 1rem 0.75rem; text-align: center; }
+  .badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
+  .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
+  .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
+  .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .field-input { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 4px; color: #e8eeff; font-size: 0.85rem; padding: 0.5rem 0.75rem; width: 100%; box-sizing: border-box; }
+  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
+  .btn-conclude { border-color: #7c3aed; color: #a78bfa; }
+  .btn-conclude:hover { border-color: #a78bfa; color: #c4b5fd; }
+  .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
+  .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-danger-sm { border-color: #ff4466; color: #ff4466; }
+  .btn-danger-sm:hover { background: rgba(255,68,102,0.12); }
+  .actions-cell { white-space: nowrap; display: flex; gap: 0.375rem; align-items: center; flex-wrap: wrap; }
+  .notes-preview { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8fa3cc; font-size: 0.8rem; }
+  .tab-badge { background: #7c3aed; border-radius: 10px; color: #fff; font-size: 0.6rem; font-weight: 700; margin-left: 4px; padding: 1px 6px; }
+  .info-block { background: rgba(61,127,255,0.05); border: 1px solid #1e2d4a; border-radius: 4px; display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem; }
+  .readonly-block { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #c8d8f0; font-size: 0.85rem; line-height: 1.6; min-height: 60px; padding: 0.625rem 0.875rem; white-space: pre-wrap; }
+  .logs-scroll { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 220px; overflow-y: auto; }
+  .log-entry { border-bottom: 1px solid #1e2d4a; padding: 0.5rem 0.75rem; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-header { display: flex; gap: 1rem; align-items: baseline; margin-bottom: 0.2rem; }
+  .log-date { color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.7rem; }
+  .log-personnel { color: #8fa3cc; font-size: 0.75rem; }
+  .log-field { color: #c8d8f0; font-size: 0.8rem; margin: 0.2rem 0 0; }
+  .test-linked { color: #a78bfa; }
+  .badge-approved { background: rgba(0,200,83,0.12); color: #00c853; }
+  .badge-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
+  .badge-conclude { background: rgba(124,58,237,0.15); color: #a78bfa; }
+  .auth-badge { border-radius: 3px; font-size: 0.8rem; font-weight: 700; padding: 0.35rem 0.625rem; }
+  .auth-ok { background: rgba(0,200,83,0.12); color: #00c853; }
+  .auth-denied { background: rgba(255,68,102,0.12); color: #ff4466; }
+  .test-checklist { border: 1px solid #1e2d4a; border-radius: 4px; max-height: 150px; overflow-y: auto; padding: 0.375rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .test-check-item { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.25rem 0.375rem; border-radius: 3px; }
+  .test-check-item:hover { background: rgba(61,127,255,0.06); }
+  .test-check-label { color: #c8d8f0; font-size: 0.85rem; }
+  .test-check-meta { color: #4a5d82; font-size: 0.75rem; margin-left: auto; }
+  .discovery-toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+  .discovery-form { background: rgba(0,200,83,0.05); border: 1px solid rgba(0,200,83,0.2); border-radius: 4px; display: flex; flex-direction: column; gap: 0.75rem; padding: 0.875rem; }
+  .discovery-label { color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+  .discovery-badge { background: rgba(0,200,83,0.08); border-radius: 3px; color: #00c853; display: inline-block; font-size: 0.8rem; padding: 2px 6px; }
+  .dashboard-section { margin-bottom: 2rem; }
+  .access-note { background: rgba(255,193,7,0.07); border: 1px solid rgba(255,193,7,0.2); border-radius: 4px; color: #ffc107; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem; padding: 0.6rem 0.75rem; }
+  .plant-only-badge { background: rgba(0,200,83,0.12); border-radius: 3px; color: #00c853; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; margin-left: 0.5rem; padding: 0.2rem 0.5rem; text-transform: uppercase; vertical-align: middle; }
+  .proxy-badge { background: rgba(0,212,255,0.1); border-radius: 3px; color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.65rem; padding: 0.2rem 0.5rem; }
+  .badge-low { background: rgba(0,200,83,0.12); color: #00c853; }
+  .badge-medium { background: rgba(255,193,7,0.12); color: #ffc107; }
+  .badge-high { background: rgba(255,152,0,0.12); color: #ff9800; }
+  .badge-critical { background: rgba(255,68,102,0.15); color: #ff4466; }
+  .species-cat-badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
+  .species-cat-plant { background: rgba(0,200,83,0.12); color: #00c853; }
+  .species-cat-animal { background: rgba(255,152,0,0.12); color: #ff9800; }
+  .species-cat-microorganism { background: rgba(156,39,176,0.12); color: #ce93d8; }
+  .species-cat-fungus { background: rgba(121,85,72,0.15); color: #bcaaa4; }
+  .species-cat-other { background: rgba(61,127,255,0.1); color: #8fa3cc; }
+  .info-text { font-size: 0.85rem; color: #8fa3cc; margin-bottom: 0.25rem; }
+  /* card/filter styles moved to WorkspaceList component (src/lib/components/WorkspaceList.svelte) */
+</style>
