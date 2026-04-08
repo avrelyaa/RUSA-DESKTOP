@@ -11,6 +11,7 @@
     shift_start: string | null;
     shift_end: string | null;
     notes: string | null;
+    shift_start_ms: number;
   };
 
   let inbox: any[] = $state([]);
@@ -52,26 +53,23 @@
       inbox = messages.filter((m: any) => !m.is_broadcast);
       broadcasts = messages.filter((m: any) => m.is_broadcast);
 
-      const now = Date.now();
       const merged = shiftsBySource.flatMap((source) =>
         source.rows
-          .filter((r: any) => !r.staff_id || r.staff_id === s.user_id)
-          .map((r: any) => ({
+          .filter((r: any) => r.staff_id === s.user_id)
+          .map((r: any): PersonalShift => ({
             id: r.id,
             department: source.department,
             shift_start: r.shift_start ?? null,
             shift_end: r.shift_end ?? null,
-            notes: r.notes ?? null
+            notes: r.notes ?? null,
+            shift_start_ms: r.shift_start ? new Date(r.shift_start).getTime() : NaN
           }))
       );
 
+      const now = Date.now();
       upcomingShifts = merged
-        .filter((shift) => {
-          if (!shift.shift_start) return false;
-          const start = new Date(shift.shift_start).getTime();
-          return Number.isFinite(start) && start >= now;
-        })
-        .sort((a, b) => (new Date(a.shift_start!).getTime()) - (new Date(b.shift_start!).getTime()));
+        .filter((shift) => Number.isFinite(shift.shift_start_ms) && shift.shift_start_ms >= now)
+        .sort((a, b) => a.shift_start_ms - b.shift_start_ms);
     } catch (e: any) {
       console.error('Failed to load dashboard data: ' + e);
     } finally {
