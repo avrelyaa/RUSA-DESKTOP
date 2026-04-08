@@ -1,5 +1,5 @@
 use once_cell::sync::OnceCell;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
 use redis::Client as RedisClient;
 
 static DB_POOL: OnceCell<PgPool> = OnceCell::new();
@@ -30,4 +30,8 @@ pub fn init_redis(redis_url: &str) -> Result<(), redis::RedisError> {
 
 pub fn get_redis() -> &'static RedisClient {
     REDIS_CLIENT.get().expect("Redis client not initialized")
+}
+
+pub async fn begin_transaction() -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    get_db().begin().await
 }

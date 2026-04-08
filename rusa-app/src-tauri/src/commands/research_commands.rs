@@ -450,6 +450,10 @@ pub async fn approve_experiment_conclusion(
         _ => {}
     }
 
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
     match decision.as_str() {
         "approve" => {
             sqlx::query(
@@ -458,7 +462,7 @@ pub async fn approve_experiment_conclusion(
             .bind(session.user_id)
             .bind(&review_notes)
             .bind(eid)
-            .execute(db::get_db())
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
         }
@@ -468,14 +472,29 @@ pub async fn approve_experiment_conclusion(
             )
             .bind(&review_notes)
             .bind(eid)
-            .execute(db::get_db())
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
         }
         _ => return Err("Decision must be 'approve' or 'reject'".to_string()),
     }
 
-    let _ = write_audit_log(Some(session.user_id), "APPROVE_EXPERIMENT_CONCLUSION", Some("experiments"), Some(eid), None, Some(serde_json::json!({ "decision": decision }))).await;
+    crate::queries::auth::write_audit_log_tx(
+        &mut tx,
+        Some(session.user_id),
+        "APPROVE_EXPERIMENT_CONCLUSION",
+        Some("experiments"),
+        Some(eid),
+        None,
+        Some(serde_json::json!({ "decision": decision })),
+    )
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
+
     Ok(())
 }
 

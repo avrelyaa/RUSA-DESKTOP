@@ -1,5 +1,6 @@
 use crate::auth::{permissions, require_role, require_role_name, validate_session_command};
-use crate::queries::auth::write_audit_log;
+use crate::db;
+use crate::queries::auth::{write_audit_log, write_audit_log_tx};
 use crate::queries::governance as governance_queries;
 use crate::queries::users as users_queries;
 use std::collections::HashMap;
@@ -57,16 +58,28 @@ pub async fn cast_vote(
     }
 
     // Upsert: allow switching within the time window
-    governance_queries::upsert_vote_ballot(vid, session.user_id, &decision, &reason)
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    governance_queries::upsert_vote_ballot_tx(&mut tx, vid, session.user_id, &decision, &reason)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
+    write_audit_log_tx(&mut tx, Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision, "reason": reason })))
+        .await
+        .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
+
     // Try to resolve immediately if quorum (8 directors) is now met
+    // This runs after commit so that the ballot is visible to the resolution query
     governance_queries::try_resolve_vote_on_quorum(vid)
         .await
         .ok(); // best-effort — don't fail the cast on resolution error
 
-    let _ = write_audit_log(Some(session.user_id), "CAST_VOTE", Some("vote_ballots"), Some(vid), None, Some(serde_json::json!({ "vote_id": vote_id, "decision": decision, "reason": reason }))).await;
     Ok(())
 }
 
@@ -578,8 +591,6 @@ pub async fn director_create_account(
     role_name: String,
     location: Option<String>,
 ) -> Result<String, String> {
-    use crate::queries::users::create_user as query_create_user;
-
     let session = validate_session_command(&token).await?;
     // Directors (tier 3) and above can create accounts
     if session.tier < 3 {
@@ -607,11 +618,17 @@ pub async fn director_create_account(
     let hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST)
         .map_err(|e| format!("Hash error: {}", e))?;
 
-    let user = query_create_user(&username, &email, &hash, &full_name, &role_name, location.as_deref())
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    use crate::queries::users::create_user_tx as query_create_user_tx;
+    let user = query_create_user_tx(&mut tx, &username, &email, &hash, &full_name, &role_name, location.as_deref())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(
+    write_audit_log_tx(
+        &mut tx,
         Some(session.user_id),
         "DIRECTOR_CREATE_ACCOUNT",
         Some("users"),
@@ -619,7 +636,12 @@ pub async fn director_create_account(
         None,
         Some(serde_json::json!({ "username": username, "role": role_name })),
     )
-    .await;
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
 
     Ok(user.id.to_string())
 }

@@ -1,5 +1,6 @@
 use crate::auth::{permissions, require_role_name, validate_session_command};
-use crate::queries::auth::write_audit_log;
+use crate::db;
+use crate::queries::auth::{write_audit_log, write_audit_log_tx};
 use crate::queries::budget as budget_queries;
 use crate::queries::governance as governance_queries;
 use uuid::Uuid;
@@ -56,11 +57,22 @@ pub async fn review_budget_request(
         }
     }
 
-    budget_queries::update_budget_request_review(rid, &status, notes.as_deref())
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    budget_queries::update_budget_request_review_tx(&mut tx, rid, &status, notes.as_deref())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "REVIEW_BUDGET_REQUEST", Some("budget_requests"), Some(rid), None, Some(serde_json::json!({ "status": status }))).await;
+    write_audit_log_tx(&mut tx, Some(session.user_id), "REVIEW_BUDGET_REQUEST", Some("budget_requests"), Some(rid), None, Some(serde_json::json!({ "status": status })))
+        .await
+        .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
+
     Ok(())
 }
 
@@ -101,7 +113,12 @@ pub async fn initiate_budget_vote(
         rid
     );
 
-    let vote_id = governance_queries::insert_vote_typed(
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    let vote_id = governance_queries::insert_vote_typed_tx(
+        &mut tx,
         &vote_title,
         Some(&vote_desc),
         session.user_id,
@@ -110,11 +127,12 @@ pub async fn initiate_budget_vote(
     .await
     .map_err(|e| format!("DB error creating vote: {}", e))?;
 
-    budget_queries::link_budget_request_to_vote(rid, vote_id)
+    budget_queries::link_budget_request_to_vote_tx(&mut tx, rid, vote_id)
         .await
         .map_err(|e| format!("DB error linking vote: {}", e))?;
 
-    let _ = write_audit_log(
+    write_audit_log_tx(
+        &mut tx,
         Some(session.user_id),
         "INITIATE_BUDGET_VOTE",
         Some("budget_requests"),
@@ -122,7 +140,12 @@ pub async fn initiate_budget_vote(
         None,
         Some(serde_json::json!({ "vote_id": vote_id.to_string() })),
     )
-    .await;
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
 
     Ok(vote_id.to_string())
 }

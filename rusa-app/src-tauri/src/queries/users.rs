@@ -74,6 +74,41 @@ pub async fn create_user(
     Ok(row)
 }
 
+pub async fn create_user_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    username: &str,
+    email: &str,
+    password_hash: &str,
+    full_name: &str,
+    role_name: &str,
+    location: Option<&str>,
+) -> Result<User, sqlx::Error> {
+    let role = sqlx::query_as::<_, Role>(
+        "SELECT id, name, display_name, tier, subsystem, created_at FROM roles WHERE name = $1",
+    )
+    .bind(role_name)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let row = sqlx::query_as::<_, User>(
+        r#"
+        INSERT INTO users (username, email, password_hash, full_name, role_id, location)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, username, email, full_name, role_id, location, tel_fax, department, department_email, is_active, created_at, updated_at, deleted_at
+        "#,
+    )
+    .bind(username)
+    .bind(email)
+    .bind(password_hash)
+    .bind(full_name)
+    .bind(role.id)
+    .bind(location)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(row)
+}
+
 pub async fn list_roles() -> Result<Vec<Role>, sqlx::Error> {
     let rows = sqlx::query_as::<_, Role>(
         "SELECT id, name, display_name, tier, subsystem, created_at FROM roles ORDER BY tier, name",

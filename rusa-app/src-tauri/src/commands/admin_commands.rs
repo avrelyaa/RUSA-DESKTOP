@@ -1,7 +1,7 @@
 use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::db;
-use crate::queries::auth::write_audit_log;
-use crate::queries::users::{create_user as query_create_user, soft_delete_user};
+use crate::queries::auth::{write_audit_log, write_audit_log_tx};
+use crate::queries::users::{create_user_tx as query_create_user_tx, soft_delete_user};
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -31,11 +31,16 @@ pub async fn admin_create_director(
     let hash =
         bcrypt::hash(&password, bcrypt::DEFAULT_COST).map_err(|e| format!("Hash error: {}", e))?;
 
-    let user = query_create_user(&username, &email, &hash, &full_name, &role_name, None)
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    let user = query_create_user_tx(&mut tx, &username, &email, &hash, &full_name, &role_name, None)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(
+    write_audit_log_tx(
+        &mut tx,
         Some(session.user_id),
         "ADMIN_CREATE_DIRECTOR",
         Some("users"),
@@ -43,7 +48,12 @@ pub async fn admin_create_director(
         None,
         Some(serde_json::json!({ "username": username, "role": role_name })),
     )
-    .await;
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
 
     Ok(user.id.to_string())
 }

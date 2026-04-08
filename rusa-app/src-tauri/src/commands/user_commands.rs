@@ -1,8 +1,9 @@
 use crate::auth::{require_role, validate_session_command};
 use crate::db;
-use crate::queries::auth::write_audit_log;
+use crate::queries::auth::{write_audit_log, write_audit_log_tx};
 use crate::queries::users::{
-    create_user as query_create_user, deactivate_user as query_deactivate,
+    create_user_tx as query_create_user_tx,
+    deactivate_user as query_deactivate,
     list_roles as query_list_roles, list_users as query_list_users,
     soft_delete_user as query_soft_delete,
 };
@@ -55,7 +56,12 @@ pub async fn create_user(
     let hash =
         bcrypt::hash(&password, bcrypt::DEFAULT_COST).map_err(|e| format!("Hash error: {}", e))?;
 
-    let user = query_create_user(
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    let user = query_create_user_tx(
+        &mut tx,
         &username,
         &email,
         &hash,
@@ -66,7 +72,8 @@ pub async fn create_user(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(
+    write_audit_log_tx(
+        &mut tx,
         Some(session.user_id),
         "CREATE_USER",
         Some("users"),
@@ -74,7 +81,12 @@ pub async fn create_user(
         None,
         Some(serde_json::json!({ "username": username, "role": role_name })),
     )
-    .await;
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
 
     Ok(user.id.to_string())
 }

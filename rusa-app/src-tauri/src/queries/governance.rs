@@ -96,6 +96,26 @@ pub async fn insert_vote_typed(
     Ok(row.0)
 }
 
+pub async fn insert_vote_typed_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    title: &str,
+    description: Option<&str>,
+    initiated_by: Uuid,
+    vote_type: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO votes (title, description, status, initiated_by, deadline, vote_type) \
+         VALUES ($1,$2,'open',$3, NOW() + INTERVAL '15 minutes',$4) RETURNING id",
+    )
+    .bind(title)
+    .bind(description)
+    .bind(initiated_by)
+    .bind(vote_type)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row.0)
+}
+
 pub async fn check_vote_status(
     vote_id: Uuid,
 ) -> Result<Option<(String, Option<chrono::DateTime<chrono::Utc>>)>, sqlx::Error> {
@@ -124,6 +144,27 @@ pub async fn upsert_vote_ballot(
     .bind(decision)
     .bind(reasoning)
     .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn upsert_vote_ballot_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    vote_id: Uuid,
+    voter_id: Uuid,
+    decision: &str,
+    reasoning: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO vote_ballots (vote_id, voter_id, decision, reasoning, voted_at)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (vote_id, voter_id) DO UPDATE SET decision = $3, reasoning = $4, voted_at = NOW()"#,
+    )
+    .bind(vote_id)
+    .bind(voter_id)
+    .bind(decision)
+    .bind(reasoning)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
