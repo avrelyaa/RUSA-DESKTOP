@@ -69,7 +69,7 @@ pub async fn insert_expenditure_report(
     reported_by: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO expenditure_reports (title, description, total_amount, items, invoice_data, status, reported_by) VALUES ($1,$2,$3,$4,$5,'pending',$6) RETURNING id",
+        "INSERT INTO expenditure_reports (title, description, total_amount, items, invoice_data, reported_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
     )
     .bind(title)
     .bind(description)
