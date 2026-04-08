@@ -1,22 +1,79 @@
 <script lang="ts">
   import PageShell from '$lib/components/PageShell.svelte';
   import { session } from '$lib/stores/auth';
-  import { messageApi } from '$lib/api';
+  import { canPerform } from '$lib/stores/permissions';
+  import { medicalApi, messageApi, sanitaryApi } from '$lib/api';
   import { onMount } from 'svelte';
+
+  type PersonalShift = {
+    id: string;
+    department: 'medical' | 'sanitary';
+    shift_start: string | null;
+    shift_end: string | null;
+    notes: string | null;
+  };
 
   let inbox: any[] = $state([]);
   let broadcasts: any[] = $state([]);
+  let upcomingShifts: PersonalShift[] = $state([]);
   let loading = $state(true);
+  let shiftsLoading = $state(true);
+
+  function hasMedicalShiftAccess() {
+    return canPerform($session, 'head_of_medicine') || canPerform($session, 'medical_staff');
+  }
+
+  function hasSanitaryShiftAccess() {
+    return (
+      canPerform($session, 'head_of_sanitary') ||
+      canPerform($session, 'cleanup_crew') ||
+      canPerform($session, 'disposal_crew') ||
+      canPerform($session, 'wastewater_crew') ||
+      canPerform($session, 'transport_crew') ||
+      canPerform($session, 'sanitary_inspector')
+    );
+  }
 
   onMount(async () => {
     const s = $session;
     if (!s) return;
     try {
-      const messages = await messageApi.getInbox(s.token);
+      const shiftSources: Array<{
+        department: 'medical' | 'sanitary';
+        request: Promise<any[]>;
+      }> = [];
+      if (hasMedicalShiftAccess()) shiftSources.push({ department: 'medical', request: medicalApi.getShifts(s.token) });
+      if (hasSanitaryShiftAccess()) shiftSources.push({ department: 'sanitary', request: sanitaryApi.getShifts(s.token) });
+
+      const [messages, ...shiftResults] = await Promise.all([messageApi.getInbox(s.token), ...shiftSources.map((source) => source.request)]);
       inbox = messages.filter((m: any) => !m.is_broadcast);
       broadcasts = messages.filter((m: any) => m.is_broadcast);
+
+      const now = Date.now();
+      const merged = shiftResults.flatMap((rows: any[], index: number) => {
+        const department = shiftSources[index]?.department ?? 'medical';
+        return rows
+          .filter((r: any) => !r.staff_id || r.staff_id === s.user_id)
+          .map((r: any) => ({
+            id: r.id,
+            department,
+            shift_start: r.shift_start ?? null,
+            shift_end: r.shift_end ?? null,
+            notes: r.notes ?? null
+          }));
+      });
+
+      upcomingShifts = merged
+        .filter((shift) => {
+          if (!shift.shift_start) return false;
+          const start = new Date(shift.shift_start).getTime();
+          return Number.isFinite(start) && start >= now;
+        })
+        .sort((a, b) => (new Date(a.shift_start ?? 0).getTime()) - (new Date(b.shift_start ?? 0).getTime()));
     } catch (e: any) {
       console.error('Failed to load dashboard data: ' + e);
+    } finally {
+      shiftsLoading = false;
     }
     loading = false;
   });
@@ -87,6 +144,29 @@
       </div>
     {/if}
   </div>
+
+  {#if hasMedicalShiftAccess() || hasSanitaryShiftAccess()}
+    <div class="schedule-widget">
+      <h2 class="section-title">My Upcoming Shifts</h2>
+      {#if shiftsLoading}
+        <p style="color: #4a5d82">Loading schedule...</p>
+      {:else if upcomingShifts.length === 0}
+        <p style="color: #4a5d82">No upcoming shifts assigned.</p>
+      {:else}
+        <div class="shift-list">
+          {#each upcomingShifts.slice(0, 8) as shift}
+            <div class="shift-row">
+              <div class="shift-dept">{shift.department === 'medical' ? 'Medical' : 'Sanitary'}</div>
+              <div class="shift-time">
+                {shift.shift_start ? new Date(shift.shift_start).toLocaleString() : '—'} → {shift.shift_end ? new Date(shift.shift_end).toLocaleString() : '—'}
+              </div>
+              <div class="shift-notes">{shift.notes || '—'}</div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </PageShell>
 
 <style>
@@ -114,4 +194,10 @@
   .broadcast-sender { font-weight: 700; color: #ff4466; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .broadcast-subject { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .broadcast-time { font-family: 'Space Mono', monospace; font-size: 0.75rem; text-align: right; color: #ff8899; }
+  .schedule-widget { background: #0d1528; border: 1px solid #1e2d4a; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+  .shift-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .shift-row { display: grid; grid-template-columns: 100px 1.3fr 1fr; gap: 0.75rem; background: #121b33; border: 1px solid #1e2d4a; border-radius: 4px; padding: 0.75rem 1rem; }
+  .shift-dept { color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .shift-time { color: #c8d8f0; }
+  .shift-notes { color: #8fa3cc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
