@@ -136,18 +136,84 @@ pub async fn get_mission_reports(
 pub async fn create_exploration_journal(
     token: String,
     mission_id: Option<String>,
-    title: String,
-    content: String,
-    is_public: bool,
+    mission_location: String,
+    mission_type: String,
+    progress_report: String,
+    next_steps: String,
+    approval_status: Option<String>,
 ) -> Result<String, String> {
     let session = validate_session_command(&token).await?;
     let mid = mission_id.as_deref().and_then(|s| Uuid::parse_str(s).ok());
 
-    let id = astronaut_queries::insert_journal(mid, &title, &content, is_public, session.user_id)
-        .await
-        .map_err(|e| format!("DB error: {}", e))?;
+    let normalized_type = match mission_type.to_lowercase().as_str() {
+        "terraneous" => "terraneous",
+        "interstellar" => "interstellar",
+        _ => return Err("Mission type must be either 'terraneous' or 'interstellar'".to_string()),
+    };
 
-    let _ = write_audit_log(Some(session.user_id), "CREATE_JOURNAL", Some("exploration_journals"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
+    let normalized_status = match approval_status
+        .as_deref()
+        .unwrap_or("draft")
+        .to_lowercase()
+        .as_str()
+    {
+        "draft" => "draft",
+        "submitted" => "submitted",
+        "approved" => "approved",
+        _ => {
+            return Err(
+                "Approval status must be one of: draft, submitted, approved".to_string(),
+            )
+        }
+    };
+
+    if normalized_status == "approved"
+        && !permissions::has_permission(&session.role_name, "the_wanderer")
+        && !permissions::has_permission(&session.role_name, "the_taskmaster")
+        && !is_admin(&session)
+    {
+        return Err("Only The Wanderer or The Taskmaster can mark an entry approved".to_string());
+    }
+
+    if mission_location.trim().is_empty() {
+        return Err("Mission location is required".to_string());
+    }
+
+    if progress_report.trim().is_empty() {
+        return Err("Progress report is required".to_string());
+    }
+
+    if next_steps.trim().is_empty() {
+        return Err("Next steps are required".to_string());
+    }
+
+    let id = astronaut_queries::insert_journal(
+        mid,
+        &mission_location,
+        normalized_type,
+        &progress_report,
+        &next_steps,
+        normalized_status,
+        session.user_id,
+    )
+    .await
+    .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "CREATE_JOURNAL",
+        Some("exploration_journals"),
+        Some(id),
+        None,
+        Some(
+            serde_json::json!({
+                "mission_location": mission_location,
+                "mission_type": normalized_type,
+                "approval_status": normalized_status
+            }),
+        ),
+    )
+    .await;
     Ok(id.to_string())
 }
 
@@ -242,6 +308,20 @@ pub async fn get_astronaut_stats(
         .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(serde_json::to_value(stats).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn get_astronaut_directory(token: String) -> Result<Vec<serde_json::Value>, String> {
+    let _session = validate_session_command(&token).await?;
+
+    let rows = astronaut_queries::get_astronaut_directory()
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap_or_default())
+        .collect())
 }
 
 #[tauri::command]
@@ -363,17 +443,36 @@ pub async fn review_conclusion_request(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    if decision == "approved" {
-        astronaut_queries::complete_mission_tx(&mut tx, mission_id)
-            .await
-            .map_err(|e| format!("DB error: {}", e))?;
+    if let Ok(Some(submitter_id)) = astronaut_queries::get_conclusion_request_submitter_tx(&mut tx, rid).await {
+        let journal_status = if decision == "approved" {
+            "approved"
+        } else {
+            "draft"
+        };
 
-        // Increment mission_counter for the astronaut who submitted the conclusion request
-        if let Ok(Some(submitter_id)) = astronaut_queries::get_conclusion_request_submitter_tx(&mut tx, rid).await {
+        astronaut_queries::set_latest_journal_approval_status_for_author_mission_tx(
+            &mut tx,
+            submitter_id,
+            mission_id,
+            journal_status,
+        )
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+        if decision == "approved" {
+            astronaut_queries::complete_mission_tx(&mut tx, mission_id)
+                .await
+                .map_err(|e| format!("DB error: {}", e))?;
+
+            // Increment mission_counter for the astronaut who submitted the conclusion request
             astronaut_queries::increment_mission_counter_tx(&mut tx, submitter_id)
                 .await
                 .map_err(|e| format!("DB error: {}", e))?;
         }
+    } else if decision == "approved" {
+        astronaut_queries::complete_mission_tx(&mut tx, mission_id)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
     }
 
     write_audit_log_tx(

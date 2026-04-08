@@ -180,6 +180,7 @@ pub fn run() {
             commands::astronaut_commands::rename_sector,
             commands::astronaut_commands::get_ships,
             commands::astronaut_commands::get_astronaut_stats,
+            commands::astronaut_commands::get_astronaut_directory,
             commands::astronaut_commands::submit_conclusion_request,
             commands::astronaut_commands::get_conclusion_requests,
             commands::astronaut_commands::review_conclusion_request,

@@ -246,8 +246,7 @@
                 {/if}
                 {#if req.vote_id && (req.status === 'pending' || req.status === 'under_review')}
                   <span class="vote-auto-note">⏳ Awaiting vote result — will auto-resolve</span>
-                {:else if (isAccountant || role === 'the_administrator') && (req.status === 'pending' || req.status === 'under_review')}
-                {#if isAccountant && (req.status === 'pending' || req.status === 'under_review')}
+                {:else if isAccountant && (req.status === 'pending' || req.status === 'under_review')}
                   <button class="btn-primary" onclick={() => openReview(req, 'budget')}>Review</button>
                   <button class="btn-warning-sm" onclick={() => openFlag(req, 'budget')}>Flag</button>
                 {/if}

@@ -25,10 +25,12 @@
     hint = ''
   }: FieldProps = $props();
 
-  // Generate a stable id from the label for accessibility
-  const fieldId = label
-    ? 'field-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    : undefined;
+  // Keep label/input association reactive if label changes.
+  const fieldId = $derived(
+    label
+      ? 'field-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      : undefined
+  );
 </script>
 
 <div class="field">

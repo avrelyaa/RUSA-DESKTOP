@@ -778,7 +778,7 @@
     <Field label="Provided Data Output (Markdown supported)" type="textarea" bind:value={responseMarkdown} rows={10} required={responseStatus==='provided'} />
 
     <div class="field">
-      <label class="field-label">Attachments</label>
+      <span class="field-label">Attachments</span>
       <input class="field-input" type="file" multiple onchange={onFilesSelected} />
       {#if selectedFiles.length}
         <div class="file-list">
@@ -790,7 +790,7 @@
     </div>
 
     <div class="field">
-      <label class="field-label">Provided By<span class="required">*</span></label>
+      <span class="field-label">Provided By<span class="required">*</span></span>
       <div class="checkboxes">
         {#each analystUsers as u}
           <label class="check">

@@ -28,7 +28,7 @@
   let activeTab = $state<DetailTab>('overview');
 
   const isChemistryExp = $derived(experiment?.experiment_type === 'new_matter');
-  const backPath = $derived(isChemistryExp ? '/physical-sciences' : '/research');
+  const backPath = $derived(isChemistryExp ? '/physical-sciences' : '/life-sciences');
 
   const canReviewExperiment = $derived(
     isChemistryExp

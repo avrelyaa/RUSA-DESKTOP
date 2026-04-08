@@ -1,85 +1,185 @@
 <script lang="ts">
   import PageShell from '$lib/components/PageShell.svelte';
   import { session } from '$lib/stores/auth';
-  import { canPerform } from '$lib/stores/permissions';
-  import { medicalApi, messageApi, sanitaryApi } from '$lib/api';
+  import {
+    aerospaceApi,
+    governanceApi,
+    medicalApi,
+    messageApi,
+    psychiatryApi,
+    researchTaskApi,
+    sanitaryApi,
+    securityApi,
+    settlementApi
+  } from '$lib/api';
   import { onMount } from 'svelte';
 
-  type PersonalShift = {
+  type PersonalScheduleItem = {
     id: string;
-    department: 'medical' | 'sanitary';
-    shift_start: string | null;
-    shift_end: string | null;
+    kind: 'shift' | 'task' | 'appointment';
+    source: string;
+    title: string;
+    starts_at: string | null;
+    ends_at: string | null;
+    due_at: string | null;
+    status: string | null;
     notes: string | null;
-    shift_start_ms: number | null;
+    sort_ms: number;
   };
 
-  const MAX_DISPLAYED_SHIFTS = 8;
+  const MAX_DISPLAYED_SCHEDULE_ITEMS = 12;
 
   let inbox: any[] = $state([]);
   let broadcasts: any[] = $state([]);
-  let upcomingShifts: PersonalShift[] = $state([]);
+  let scheduleItems: PersonalScheduleItem[] = $state([]);
   let loading = $state(true);
-  let shiftsLoading = $state(true);
+  let scheduleLoading = $state(true);
 
-  function hasMedicalShiftAccess() {
-    return canPerform($session, 'head_of_medicine') || canPerform($session, 'medical_staff');
+  function toTimeMs(dateValue: string | null | undefined): number | null {
+    if (!dateValue) return null;
+    // Treat date-only due dates as end-of-day so they remain visible throughout that day.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+      const ms = new Date(`${dateValue}T23:59:59`).getTime();
+      return Number.isFinite(ms) ? ms : null;
+    }
+    const ms = new Date(dateValue).getTime();
+    return Number.isFinite(ms) ? ms : null;
   }
 
-  function hasSanitaryShiftAccess() {
-    return (
-      canPerform($session, 'head_of_sanitary') ||
-      canPerform($session, 'cleanup_crew') ||
-      canPerform($session, 'disposal_crew') ||
-      canPerform($session, 'wastewater_crew') ||
-      canPerform($session, 'transport_crew') ||
-      canPerform($session, 'sanitary_inspector')
-    );
-  }
-
-  function formatShiftTime(dateStr: string | null): string {
+  function formatDateTime(dateStr: string | null): string {
     return dateStr ? new Date(dateStr).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  }
+
+  function asStringId(value: unknown): string {
+    return typeof value === 'string' ? value : '';
+  }
+
+  function matchesAssignedUser(row: any, userId: string): boolean {
+    const assignedTo = asStringId(row?.assigned_to);
+    const staffId = asStringId(row?.staff_id);
+    const patientId = asStringId(row?.patient_id);
+    const psychiatristId = asStringId(row?.psychiatrist_id);
+    return assignedTo === userId || staffId === userId || patientId === userId || psychiatristId === userId;
   }
 
   onMount(async () => {
     const s = $session;
     if (!s) return;
     try {
-      const shiftSources: Array<{
-        department: 'medical' | 'sanitary';
-        request: Promise<any[]>;
-      }> = [];
-      if (hasMedicalShiftAccess()) shiftSources.push({ department: 'medical', request: medicalApi.getShifts(s.token) });
-      if (hasSanitaryShiftAccess()) shiftSources.push({ department: 'sanitary', request: sanitaryApi.getShifts(s.token) });
-
-      const [messages, shiftsBySource] = await Promise.all([
+      const [messages, scheduleSources] = await Promise.all([
         messageApi.getInbox(s.token),
-        Promise.all(shiftSources.map(async (source) => ({ department: source.department, rows: await source.request })))
+        Promise.allSettled([
+          medicalApi.getShifts(s.token),
+          sanitaryApi.getShifts(s.token),
+          medicalApi.getTasks(s.token),
+          sanitaryApi.getTasks(s.token),
+          psychiatryApi.getTasks(s.token),
+          psychiatryApi.getAppointments(s.token),
+          securityApi.getSecurityTasks(s.token),
+          settlementApi.getTasks(s.token),
+          governanceApi.getNomadTasks(s.token),
+          researchTaskApi.getTasks(s.token),
+          aerospaceApi.getAssignedTasks(s.token)
+        ])
       ]);
       inbox = messages.filter((m: any) => !m.is_broadcast);
       broadcasts = messages.filter((m: any) => m.is_broadcast);
 
-      const merged = shiftsBySource.flatMap((source) =>
-        source.rows
-          .filter((r: any) => r.staff_id === s.user_id)
-          .map((r: any): PersonalShift => ({
-            id: r.id,
-            department: source.department,
-            shift_start: r.shift_start ?? null,
-            shift_end: r.shift_end ?? null,
-            notes: r.notes ?? null,
-            shift_start_ms: r.shift_start ? new Date(r.shift_start).getTime() : null
-          }))
-      );
+      const [medicalShifts, sanitaryShifts, medicalTasks, sanitaryTasks, psychiatryTasks, appointments, securityTasks, settlerTasks, nomadTasks, researchTasks, aerospaceTasks] =
+        scheduleSources.map((result) => (result.status === 'fulfilled' ? result.value : []));
+
+      const collected: PersonalScheduleItem[] = [];
+
+      for (const row of medicalShifts.filter((r: any) => matchesAssignedUser(r, s.user_id))) {
+        const startMs = toTimeMs(row.shift_start ?? null);
+        if (startMs === null) continue;
+        collected.push({
+          id: String(row.id),
+          kind: 'shift',
+          source: 'Medical',
+          title: row.staff_name ? `${row.staff_name} Shift` : 'Assigned Shift',
+          starts_at: row.shift_start ?? null,
+          ends_at: row.shift_end ?? null,
+          due_at: null,
+          status: null,
+          notes: row.notes ?? null,
+          sort_ms: startMs
+        });
+      }
+
+      for (const row of sanitaryShifts.filter((r: any) => matchesAssignedUser(r, s.user_id))) {
+        const startMs = toTimeMs(row.shift_start ?? null);
+        if (startMs === null) continue;
+        collected.push({
+          id: String(row.id),
+          kind: 'shift',
+          source: 'Sanitary',
+          title: row.staff_name ? `${row.staff_name} Shift` : 'Assigned Shift',
+          starts_at: row.shift_start ?? null,
+          ends_at: row.shift_end ?? null,
+          due_at: null,
+          status: null,
+          notes: row.notes ?? null,
+          sort_ms: startMs
+        });
+      }
+
+      for (const row of appointments.filter((r: any) => matchesAssignedUser(r, s.user_id))) {
+        const schedMs = toTimeMs(row.scheduled_at ?? null);
+        if (schedMs === null) continue;
+        collected.push({
+          id: String(row.id),
+          kind: 'appointment',
+          source: 'Psychiatry',
+          title: row.patient_name ? `Appointment: ${row.patient_name}` : 'Scheduled Appointment',
+          starts_at: row.scheduled_at ?? null,
+          ends_at: null,
+          due_at: null,
+          status: row.status ?? null,
+          notes: row.findings ?? null,
+          sort_ms: schedMs
+        });
+      }
+
+      const taskSources: Array<{ source: string; rows: any[] }> = [
+        { source: 'Medical', rows: medicalTasks },
+        { source: 'Sanitary', rows: sanitaryTasks },
+        { source: 'Psychiatry', rows: psychiatryTasks },
+        { source: 'Security', rows: securityTasks },
+        { source: 'Settlement', rows: settlerTasks },
+        { source: 'Governance', rows: nomadTasks },
+        { source: 'Research', rows: researchTasks },
+        { source: 'Aerospace', rows: aerospaceTasks }
+      ];
+
+      for (const source of taskSources) {
+        for (const row of source.rows.filter((r: any) => matchesAssignedUser(r, s.user_id))) {
+          const dueAt = row.due_date ?? null;
+          const dueMs = toTimeMs(dueAt);
+          if (dueMs === null) continue;
+          collected.push({
+            id: String(row.id),
+            kind: 'task',
+            source: source.source,
+            title: row.title ?? 'Assigned Task',
+            starts_at: null,
+            ends_at: null,
+            due_at: dueAt,
+            status: row.status ?? null,
+            notes: row.description ?? row.progress_notes ?? row.result_notes ?? null,
+            sort_ms: dueMs
+          });
+        }
+      }
 
       const now = Date.now();
-      upcomingShifts = merged
-        .filter((shift): shift is PersonalShift & { shift_start_ms: number } => shift.shift_start_ms !== null && shift.shift_start_ms >= now)
-        .sort((a, b) => a.shift_start_ms - b.shift_start_ms);
+      scheduleItems = collected
+        .filter((item) => item.sort_ms >= now)
+        .sort((a, b) => a.sort_ms - b.sort_ms);
     } catch (e: any) {
-      console.error('Failed to load dashboard messages/shifts: ' + e);
+      console.error('Failed to load dashboard messages/schedule: ' + e);
     } finally {
-      shiftsLoading = false;
+      scheduleLoading = false;
     }
     loading = false;
   });
@@ -151,28 +251,35 @@
     {/if}
   </div>
 
-  {#if hasMedicalShiftAccess() || hasSanitaryShiftAccess()}
-    <div class="schedule-widget">
-      <h2 class="section-title">My Upcoming Shifts</h2>
-      {#if shiftsLoading}
-        <p style="color: #4a5d82">Loading schedule...</p>
-      {:else if upcomingShifts.length === 0}
-        <p style="color: #4a5d82">No upcoming shifts assigned.</p>
-      {:else}
-        <div class="shift-list">
-          {#each upcomingShifts.slice(0, MAX_DISPLAYED_SHIFTS) as shift}
-            <div class="shift-row">
-              <div class="shift-dept">{shift.department === 'medical' ? 'Medical' : 'Sanitary'}</div>
-              <div class="shift-time">
-                {formatShiftTime(shift.shift_start)} → {formatShiftTime(shift.shift_end)}
-              </div>
-              <div class="shift-notes">{shift.notes || '—'}</div>
+  <div class="schedule-widget">
+    <h2 class="section-title">My Schedule Timeline</h2>
+    {#if scheduleLoading}
+      <p style="color: #4a5d82">Loading schedule...</p>
+    {:else if scheduleItems.length === 0}
+      <p style="color: #4a5d82">No upcoming assignments found.</p>
+    {:else}
+      <div class="shift-list">
+        {#each scheduleItems.slice(0, MAX_DISPLAYED_SCHEDULE_ITEMS) as item}
+          <div class="shift-row">
+            <div class="shift-dept">{item.source}</div>
+            <div class="shift-time">
+              {#if item.kind === 'shift'}
+                {formatDateTime(item.starts_at)} → {formatDateTime(item.ends_at)}
+              {:else if item.kind === 'appointment'}
+                {formatDateTime(item.starts_at)}
+              {:else}
+                Due {formatDateTime(item.due_at)}
+              {/if}
             </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
-  {/if}
+            <div class="shift-notes">
+              <strong>{item.title}</strong>{item.status ? ` (${item.status})` : ''}
+              {item.notes ? ` - ${item.notes}` : ''}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
 </PageShell>
 
 <style>

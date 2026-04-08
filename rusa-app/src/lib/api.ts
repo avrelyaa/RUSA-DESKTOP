@@ -198,9 +198,26 @@ export const astronautApi = {
   submitReport: (token: string, missionId: string, reportType: string, content: string) =>
     invoke<string>('submit_mission_report', { token, missionId, reportType, content }),
   getReports: (token: string, missionId: string) => invoke<any[]>('get_mission_reports', { token, missionId }),
-  createJournal: (token: string, missionId?: string, title?: string, content?: string, isPublic?: boolean) =>
-    invoke<string>('create_exploration_journal', { token, missionId, title, content, isPublic }),
+  createJournal: (
+    token: string,
+    missionLocation: string,
+    missionType: 'terraneous' | 'interstellar',
+    progressReport: string,
+    nextSteps: string,
+    approvalStatus: 'draft' | 'submitted' | 'approved',
+    missionId?: string,
+  ) =>
+    invoke<string>('create_exploration_journal', {
+      token,
+      missionId,
+      missionLocation,
+      missionType,
+      progressReport,
+      nextSteps,
+      approvalStatus,
+    }),
   getJournals: (token: string) => invoke<any[]>('get_journals', { token }),
+  getAstronautDirectory: (token: string) => invoke<any[]>('get_astronaut_directory', { token }),
   getSectors: (token: string) => invoke<any[]>('get_sectors', { token }),
   createSector: (token: string, name: string, description?: string, boundaries?: string) =>
     invoke<string>('create_sector', { token, name, description, boundaries }),

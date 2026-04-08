@@ -32,7 +32,7 @@
     if (role === 'physicist') return '/physical-sciences';
     if (role === 'mathematician') return '/mathematics';
     if (role === 'aerospace_engineer') return '/aerospace';
-    if (role === 'biological_engineer' || role === 'agricultural_engineer') return '/life-sciences';
+    if (role === 'biologist' || role === 'biological_engineer' || role === 'agricultural_engineer') return '/life-sciences';
     // Directors navigating back go to research by default
     return '/research';
   });
@@ -60,7 +60,7 @@
       allUsers = users;
       if (!request) {
         showToast('Help request not found', 'error');
-        goto('/research');
+        goto(backPath);
       }
     } catch (e: any) {
       showToast('Failed to load: ' + e, 'error');

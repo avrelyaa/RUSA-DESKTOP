@@ -33,7 +33,13 @@ pub struct JournalRow {
     pub title: String,
     pub content: Option<String>,
     pub is_public: Option<bool>,
+    pub mission_location: Option<String>,
+    pub mission_type: Option<String>,
+    pub progress_report: Option<String>,
+    pub next_steps: Option<String>,
+    pub approval_status: Option<String>,
     pub author_id: Option<Uuid>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -75,6 +81,22 @@ pub struct AstronautStatsRow {
     pub completed_missions: Option<i64>,
     pub total_reports: Option<i64>,
     pub total_journals: Option<i64>,
+    pub terrain_missions: Option<i64>,
+    pub interstellar_missions: Option<i64>,
+    pub pending_approval: Option<i64>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct AstronautDirectoryRow {
+    pub astronaut_id: Uuid,
+    pub full_name: String,
+    pub username: String,
+    pub current_status: String,
+    pub current_assignment: Option<String>,
+    pub terrain_count: i64,
+    pub interstellar_count: i64,
+    pub visited_locations: Vec<String>,
+    pub comm_link: Option<String>,
 }
 
 pub async fn get_all_missions() -> Result<Vec<MissionRow>, sqlx::Error> {
@@ -170,18 +192,25 @@ pub async fn get_mission_reports_by_mission(
 
 pub async fn insert_journal(
     mission_id: Option<Uuid>,
-    title: &str,
-    content: &str,
-    is_public: bool,
+    mission_location: &str,
+    mission_type: &str,
+    progress_report: &str,
+    next_steps: &str,
+    approval_status: &str,
     author_id: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
+    let title = format!("{} mission log", mission_location);
     let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO exploration_journals (mission_id, title, content, is_public, author_id) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        "INSERT INTO exploration_journals (mission_id, title, content, is_public, mission_location, mission_type, progress_report, next_steps, approval_status, author_id) VALUES ($1,$2,$3,false,$4,$5,$6,$7,$8,$9) RETURNING id",
     )
     .bind(mission_id)
     .bind(title)
-    .bind(content)
-    .bind(is_public)
+    .bind(progress_report)
+    .bind(mission_location)
+    .bind(mission_type)
+    .bind(progress_report)
+    .bind(next_steps)
+    .bind(approval_status)
     .bind(author_id)
     .fetch_one(get_db())
     .await?;
@@ -190,7 +219,7 @@ pub async fn insert_journal(
 
 pub async fn get_journals_for_user(user_id: Uuid) -> Result<Vec<JournalRow>, sqlx::Error> {
     sqlx::query_as::<_, JournalRow>(
-        "SELECT id, mission_id, title, content, is_public, author_id, created_at FROM exploration_journals WHERE (is_public = true OR author_id = $1) AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, mission_id, title, content, is_public, mission_location, mission_type, progress_report, next_steps, approval_status, author_id, updated_at, created_at FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(get_db())
@@ -252,11 +281,60 @@ pub async fn get_astronaut_stats(user_id: Uuid) -> Result<AstronautStatsRow, sql
             (SELECT COUNT(*) FROM mission_crew WHERE user_id = $1) as total_missions,
             (SELECT COUNT(*) FROM mission_crew mc JOIN missions m ON mc.mission_id = m.id WHERE mc.user_id = $1 AND m.status = 'completed') as completed_missions,
             (SELECT COUNT(*) FROM mission_reports WHERE submitted_by = $1) as total_reports,
-            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL) as total_journals
+            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL) as total_journals,
+            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL AND approval_status = 'approved' AND mission_type = 'terraneous') as terrain_missions,
+            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL AND approval_status = 'approved' AND mission_type = 'interstellar') as interstellar_missions,
+            (SELECT COUNT(*) FROM exploration_journals WHERE author_id = $1 AND deleted_at IS NULL AND approval_status = 'submitted') as pending_approval
         "#,
     )
     .bind(user_id)
     .fetch_one(get_db())
+    .await
+}
+
+pub async fn get_astronaut_directory() -> Result<Vec<AstronautDirectoryRow>, sqlx::Error> {
+    sqlx::query_as::<_, AstronautDirectoryRow>(
+        r#"
+        SELECT
+            u.id as astronaut_id,
+            u.full_name,
+            u.username,
+            COALESCE(last_log.approval_status, 'available') as current_status,
+            last_log.mission_location as current_assignment,
+            COALESCE(counters.terrain_count, 0) as terrain_count,
+            COALESCE(counters.interstellar_count, 0) as interstellar_count,
+            COALESCE(locs.visited_locations, ARRAY[]::TEXT[]) as visited_locations,
+            COALESCE(u.department_email, u.email) as comm_link
+        FROM users u
+        JOIN roles r ON r.id = u.role_id
+        LEFT JOIN LATERAL (
+            SELECT ej.approval_status, ej.mission_location
+            FROM exploration_journals ej
+            WHERE ej.author_id = u.id AND ej.deleted_at IS NULL
+            ORDER BY COALESCE(ej.updated_at, ej.created_at) DESC
+            LIMIT 1
+        ) last_log ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(*) FILTER (WHERE ej.approval_status = 'approved' AND ej.mission_type = 'terraneous')::BIGINT as terrain_count,
+                COUNT(*) FILTER (WHERE ej.approval_status = 'approved' AND ej.mission_type = 'interstellar')::BIGINT as interstellar_count
+            FROM exploration_journals ej
+            WHERE ej.author_id = u.id AND ej.deleted_at IS NULL
+        ) counters ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT ARRAY_AGG(DISTINCT ej.mission_location) FILTER (
+                WHERE ej.mission_location IS NOT NULL AND ej.mission_location <> '' AND ej.approval_status = 'approved'
+            ) as visited_locations
+            FROM exploration_journals ej
+            WHERE ej.author_id = u.id AND ej.deleted_at IS NULL
+        ) locs ON TRUE
+        WHERE u.deleted_at IS NULL
+          AND COALESCE(u.is_active, true) = true
+          AND r.name = 'astronaut'
+        ORDER BY u.full_name ASC
+        "#,
+    )
+    .fetch_all(get_db())
     .await
 }
 
@@ -442,6 +520,36 @@ pub async fn increment_mission_counter_tx(
         "UPDATE users SET mission_counter = mission_counter + 1 WHERE id = $1",
     )
     .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_latest_journal_approval_status_for_author_mission_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    author_id: Uuid,
+    mission_id: Uuid,
+    approval_status: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE exploration_journals
+        SET approval_status = $1,
+            updated_at = NOW()
+        WHERE id = (
+            SELECT id
+            FROM exploration_journals
+            WHERE author_id = $2
+              AND mission_id = $3
+              AND deleted_at IS NULL
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 1
+        )
+        "#,
+    )
+    .bind(approval_status)
+    .bind(author_id)
+    .bind(mission_id)
     .execute(&mut **tx)
     .await?;
     Ok(())
