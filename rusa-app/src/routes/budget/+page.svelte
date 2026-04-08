@@ -84,9 +84,14 @@
     const s = $session; if (!s || !selectedItem) return;
     if (!reviewStatus) { showToast('Status required', 'error'); return; }
     try {
-      await budgetApi.reviewBudget(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+      if (reviewType === 'expenditure') {
+        await budgetApi.reviewExpenditure(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+        expenditures = await budgetApi.getExpenditures(s.token);
+      } else {
+        await budgetApi.reviewBudget(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+        requests = await budgetApi.getBudgetRequests(s.token);
+      }
       showToast('Review submitted', 'success'); reviewOpen = false;
-      requests = await budgetApi.getBudgetRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -253,20 +258,22 @@
   {/if}
 </PageShell>
 
-<Modal bind:open={reviewOpen} title="Review: {selectedItem?.title}">
+<Modal bind:open={reviewOpen} title="{reviewType === 'expenditure' ? 'Review Report' : 'Review Request'}: {selectedItem?.title}">
   <div class="form">
     <p class="info-text">Amount: <strong>{selectedItem?.amount || selectedItem?.total_amount}</strong></p>
-    {#if selectedItem?.vote_id}
-      <p class="vote-requirement-note">
-        🗳 This budget request has a linked directors' vote. <strong>Approval requires the vote to have passed.</strong>
-        If the vote has not passed, the approval will be blocked.
-      </p>
-    {:else}
-      <p class="vote-warning-note">
-        ⚠ <strong>No directors' vote is linked to this request.</strong>
-        Per RUSA policy, budget requests require a collective directors' vote before approval.
-        Close this review and use "Initiate Director Vote" first.
-      </p>
+    {#if reviewType === 'budget'}
+      {#if selectedItem?.vote_id}
+        <p class="vote-requirement-note">
+          🗳 This budget request has a linked directors' vote. <strong>Approval requires the vote to have passed.</strong>
+          If the vote has not passed, the approval will be blocked.
+        </p>
+      {:else}
+        <p class="vote-warning-note">
+          ⚠ <strong>No directors' vote is linked to this request.</strong>
+          Per RUSA policy, budget requests require a collective directors' vote before approval.
+          Close this review and use "Initiate Director Vote" first.
+        </p>
+      {/if}
     {/if}
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />

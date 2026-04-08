@@ -371,6 +371,8 @@ export const budgetApi = {
     invoke<string>('submit_expenditure_report', { token, title, description, totalAmount, items, invoiceData }),
   flagExpenditure: (token: string, reportId: string, reason: string) =>
     invoke<void>('flag_expenditure_report', { token, reportId, reason }),
+  reviewExpenditure: (token: string, reportId: string, status: string, notes?: string) =>
+    invoke<void>('review_expenditure_report', { token, reportId, status, notes }),
   submitInvestigation: (token: string, title: string, description: string, relatedReportId?: string) =>
     invoke<string>('submit_investigation', { token, title, description, relatedReportId }),
   initiateBudgetVote: (token: string, requestId: string) =>
