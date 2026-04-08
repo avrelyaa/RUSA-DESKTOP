@@ -11,8 +11,10 @@
     shift_start: string | null;
     shift_end: string | null;
     notes: string | null;
-    shift_start_ms: number;
+    shift_start_ms: number | null;
   };
+
+  const MAX_DISPLAYED_SHIFTS = 8;
 
   let inbox: any[] = $state([]);
   let broadcasts: any[] = $state([]);
@@ -33,6 +35,10 @@
       canPerform($session, 'transport_crew') ||
       canPerform($session, 'sanitary_inspector')
     );
+  }
+
+  function formatShiftTime(dateStr: string | null): string {
+    return dateStr ? new Date(dateStr).toLocaleString() : '—';
   }
 
   onMount(async () => {
@@ -62,14 +68,14 @@
             shift_start: r.shift_start ?? null,
             shift_end: r.shift_end ?? null,
             notes: r.notes ?? null,
-            shift_start_ms: r.shift_start ? new Date(r.shift_start).getTime() : NaN
+            shift_start_ms: r.shift_start ? new Date(r.shift_start).getTime() : null
           }))
       );
 
       const now = Date.now();
       upcomingShifts = merged
-        .filter((shift) => Number.isFinite(shift.shift_start_ms) && shift.shift_start_ms >= now)
-        .sort((a, b) => a.shift_start_ms - b.shift_start_ms);
+        .filter((shift) => shift.shift_start_ms !== null && shift.shift_start_ms >= now)
+        .sort((a, b) => (a.shift_start_ms ?? 0) - (b.shift_start_ms ?? 0));
     } catch (e: any) {
       console.error('Failed to load dashboard data: ' + e);
     } finally {
@@ -154,11 +160,11 @@
         <p style="color: #4a5d82">No upcoming shifts assigned.</p>
       {:else}
         <div class="shift-list">
-          {#each upcomingShifts.slice(0, 8) as shift}
+          {#each upcomingShifts.slice(0, MAX_DISPLAYED_SHIFTS) as shift}
             <div class="shift-row">
               <div class="shift-dept">{shift.department === 'medical' ? 'Medical' : 'Sanitary'}</div>
               <div class="shift-time">
-                {new Date(shift.shift_start!).toLocaleString()} → {shift.shift_end ? new Date(shift.shift_end).toLocaleString() : '—'}
+                {formatShiftTime(shift.shift_start)} → {formatShiftTime(shift.shift_end)}
               </div>
               <div class="shift-notes">{shift.notes || '—'}</div>
             </div>
