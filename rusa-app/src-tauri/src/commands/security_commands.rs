@@ -474,8 +474,9 @@ pub async fn submit_external_report(
     token: String,
     title: String,
     description: String,
+    reporter_name: Option<String>,
     security_type: Option<String>,
-) -> Result<String, String> {
+) -> Result<serde_json::Value, String> {
     let session = validate_session_command(&token).await?;
 
     let security_roles = ["the_guardian", "the_overseer", "earth_security_head", "earth_security_staff", "galactic_security_head", "galactic_security_staff"];
@@ -483,17 +484,45 @@ pub async fn submit_external_report(
         return Err("Security personnel cannot submit external reports. Use incident reports instead.".to_string());
     }
 
-    let id = security_queries::insert_external_report(
+    // Use the reporter's account email so notifications can reach them
+    let reporter_email: Option<String> = sqlx::query_scalar(
+        "SELECT email FROM users WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(session.user_id)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .unwrap_or(None);
+
+    let (id, public_token) = security_queries::insert_external_report(
         &title,
         &description,
         session.user_id,
+        reporter_name.as_deref(),
+        reporter_email.as_deref(),
         security_type.as_deref(),
     )
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
-    let _ = write_audit_log(Some(session.user_id), "SUBMIT_EXTERNAL_REPORT", Some("external_reports"), Some(id), None, Some(serde_json::json!({ "title": title }))).await;
-    Ok(id.to_string())
+    let _ = security_queries::insert_external_report_event(
+        id,
+        Some(session.user_id),
+        "CREATED",
+        None,
+        Some("PENDING_REVIEW"),
+        Some(serde_json::json!({ "title": title })),
+    ).await;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "SUBMIT_EXTERNAL_REPORT",
+        Some("external_reports"),
+        Some(id),
+        None,
+        Some(serde_json::json!({ "title": title })),
+    ).await;
+
+    Ok(serde_json::json!({ "id": id, "public_token": public_token }))
 }
 
 #[tauri::command]
@@ -501,12 +530,153 @@ pub async fn get_external_reports(token: String) -> Result<Vec<serde_json::Value
     let session = validate_session_command(&token).await?;
 
     let security_roles = ["the_guardian", "the_overseer", "earth_security_head", "earth_security_staff", "galactic_security_head", "galactic_security_staff"];
-    let rows = if security_roles.contains(&session.role_name.as_str()) {
+    let rows = if security_roles.contains(&session.role_name.as_str()) || is_admin(&session) {
         security_queries::get_all_external_reports().await
     } else {
         security_queries::get_external_reports_by_submitter(session.user_id).await
     }
     .map_err(|e| format!("DB error: {}", e))?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}
+
+#[tauri::command]
+pub async fn update_external_report_status(
+    token: String,
+    report_id: String,
+    status: String,
+    closed_reason: Option<String>,
+    public_update_message: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    if !security_roles.contains(&session.role_name.as_str()) && !is_admin(&session) {
+        return Err("Only security staff can update external report status".to_string());
+    }
+
+    // Dismiss requires a non-empty reason
+    let reason_is_empty = closed_reason.as_deref().map_or(true, |s| s.trim().is_empty());
+    if status == "DISMISSED" && reason_is_empty {
+        return Err("A dismissal reason is required".to_string());
+    }
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+
+    let (from_status, to_status) = security_queries::transition_external_report_status(
+        rid,
+        &status,
+        closed_reason.as_deref(),
+        public_update_message.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("Transition error: {}", e))?;
+
+    let _ = security_queries::insert_external_report_event(
+        rid,
+        Some(session.user_id),
+        "STATUS_CHANGED",
+        Some(&from_status),
+        Some(&to_status),
+        Some(serde_json::json!({ "closed_reason": closed_reason, "public_update": public_update_message })),
+    ).await;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "UPDATE_EXTERNAL_REPORT_STATUS",
+        Some("external_reports"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "from": from_status, "to": to_status, "closed_reason": closed_reason })),
+    ).await;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn add_external_report_public_update(
+    token: String,
+    report_id: String,
+    message: String,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    if !security_roles.contains(&session.role_name.as_str()) && !is_admin(&session) {
+        return Err("Only security staff can add public updates".to_string());
+    }
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+
+    security_queries::set_external_report_public_update(rid, &message)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = security_queries::insert_external_report_event(
+        rid,
+        Some(session.user_id),
+        "COMMENT_ADDED",
+        None,
+        None,
+        Some(serde_json::json!({ "message": message })),
+    ).await;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "ADD_EXTERNAL_REPORT_PUBLIC_UPDATE",
+        Some("external_reports"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "message": message })),
+    ).await;
+
+    Ok(())
+}
+
+/// Reporter-facing status view. Uses `public_token` (UUID) — no security session required;
+/// any valid session token is sufficient so the IPC layer stays consistent.
+#[tauri::command]
+pub async fn get_external_report_status(
+    token: String,
+    public_token: String,
+) -> Result<serde_json::Value, String> {
+    let _session = validate_session_command(&token).await?;
+    let pt = Uuid::parse_str(&public_token).map_err(|_| "Invalid token".to_string())?;
+
+    let view = security_queries::get_external_report_public_view(pt)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Report not found".to_string())?;
+
+    Ok(serde_json::to_value(view).unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn get_external_report_events(
+    token: String,
+    report_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let session = validate_session_command(&token).await?;
+    let security_roles = [
+        "the_guardian", "the_overseer",
+        "earth_security_head", "earth_security_staff",
+        "galactic_security_head", "galactic_security_staff",
+    ];
+    if !security_roles.contains(&session.role_name.as_str()) && !is_admin(&session) {
+        return Err("Only security staff can view report events".to_string());
+    }
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+
+    let rows = security_queries::get_external_report_events(rid)
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
 
     Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
 }

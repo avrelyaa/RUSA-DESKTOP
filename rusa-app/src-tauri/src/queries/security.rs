@@ -403,44 +403,228 @@ pub struct ExternalReportRow {
     pub title: String,
     pub description: Option<String>,
     pub submitted_by: Option<Uuid>,
+    pub reporter_name: Option<String>,
+    pub reporter_email: Option<String>,
     pub security_type: Option<String>,
     pub status: Option<String>,
-    pub incident_report_id: Option<Uuid>,
+    pub status_changed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub closed_reason: Option<String>,
+    pub public_update_message: Option<String>,
+    pub public_token: Option<Uuid>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
+
+/// Reporter-safe view: excludes internal-only fields (closed_reason, submitted_by, security_type).
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct ExternalReportPublicView {
+    pub id: Uuid,
+    pub title: String,
+    pub status: Option<String>,
+    pub status_changed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub public_update_message: Option<String>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct ExternalReportEventRow {
+    pub id: Uuid,
+    pub report_id: Uuid,
+    pub actor_id: Option<Uuid>,
+    pub event_type: String,
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+const EXTERNAL_REPORT_SELECT: &str =
+    "SELECT id, title, description, submitted_by, reporter_name, reporter_email, \
+            security_type, status, status_changed_at, closed_reason, \
+            public_update_message, public_token, created_at, updated_at \
+     FROM external_reports";
 
 pub async fn insert_external_report(
     title: &str,
     description: &str,
     submitted_by: Uuid,
+    reporter_name: Option<&str>,
+    reporter_email: Option<&str>,
     security_type: Option<&str>,
-) -> Result<Uuid, sqlx::Error> {
-    let row: (Uuid,) = sqlx::query_as(
-        "INSERT INTO external_reports (title, description, submitted_by, security_type, status) VALUES ($1,$2,$3,$4,'submitted') RETURNING id",
+) -> Result<(Uuid, Uuid), sqlx::Error> {
+    let row: (Uuid, Uuid) = sqlx::query_as(
+        "INSERT INTO external_reports \
+             (title, description, submitted_by, reporter_name, reporter_email, security_type, status) \
+         VALUES ($1,$2,$3,$4,$5,$6,'PENDING_REVIEW') \
+         RETURNING id, public_token",
     )
     .bind(title)
     .bind(description)
     .bind(submitted_by)
+    .bind(reporter_name)
+    .bind(reporter_email)
     .bind(security_type)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row)
+}
+
+/// Validate and apply a status transition. Returns (from_status, to_status) on success.
+pub async fn transition_external_report_status(
+    report_id: Uuid,
+    new_status: &str,
+    closed_reason: Option<&str>,
+    public_update_message: Option<&str>,
+) -> Result<(String, String), sqlx::Error> {
+    // Fetch current status
+    let current: Option<(String,)> =
+        sqlx::query_as("SELECT status FROM external_reports WHERE id = $1 AND deleted_at IS NULL")
+            .bind(report_id)
+            .fetch_optional(get_db())
+            .await?;
+
+    let from_status = current
+        .map(|r| r.0)
+        .unwrap_or_else(|| "PENDING_REVIEW".to_string());
+
+    // Enforce valid transitions
+    let valid = match (from_status.as_str(), new_status) {
+        ("PENDING_REVIEW", "UNDER_INVESTIGATION") => true,
+        ("PENDING_REVIEW", "DISMISSED") => true,
+        ("UNDER_INVESTIGATION", "CLOSED_RESOLVED") => true,
+        ("UNDER_INVESTIGATION", "DISMISSED") => true,
+        _ => false,
+    };
+
+    if !valid {
+        let allowed = match from_status.as_str() {
+            "PENDING_REVIEW"      => "UNDER_INVESTIGATION, DISMISSED",
+            "UNDER_INVESTIGATION" => "CLOSED_RESOLVED, DISMISSED",
+            _ => "none (terminal state)",
+        };
+        return Err(sqlx::Error::Protocol(format!(
+            "Invalid transition from {} to {}. Allowed transitions from {}: {}",
+            from_status, new_status, from_status, allowed
+        )));
+    }
+
+    sqlx::query(
+        "UPDATE external_reports \
+         SET status = $1, \
+             status_changed_at = NOW(), \
+             updated_at = NOW(), \
+             closed_reason = COALESCE($2, closed_reason), \
+             public_update_message = COALESCE($3, public_update_message) \
+         WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(new_status)
+    .bind(closed_reason)
+    .bind(public_update_message)
+    .bind(report_id)
+    .execute(get_db())
+    .await?;
+
+    Ok((from_status, new_status.to_string()))
+}
+
+pub async fn set_external_report_public_update(
+    report_id: Uuid,
+    message: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE external_reports \
+         SET public_update_message = $1, updated_at = NOW() \
+         WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(message)
+    .bind(report_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn insert_external_report_event(
+    report_id: Uuid,
+    actor_id: Option<Uuid>,
+    event_type: &str,
+    from_status: Option<&str>,
+    to_status: Option<&str>,
+    metadata: Option<serde_json::Value>,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO external_security_report_events \
+             (report_id, actor_id, event_type, from_status, to_status, metadata) \
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+    )
+    .bind(report_id)
+    .bind(actor_id)
+    .bind(event_type)
+    .bind(from_status)
+    .bind(to_status)
+    .bind(metadata)
     .fetch_one(get_db())
     .await?;
     Ok(row.0)
 }
 
-pub async fn get_all_external_reports() -> Result<Vec<ExternalReportRow>, sqlx::Error> {
-    sqlx::query_as::<_, ExternalReportRow>(
-        "SELECT id, title, description, submitted_by, security_type, status, incident_report_id, created_at FROM external_reports WHERE deleted_at IS NULL ORDER BY created_at DESC",
+pub async fn get_external_report_events(
+    report_id: Uuid,
+) -> Result<Vec<ExternalReportEventRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportEventRow>(
+        "SELECT id, report_id, actor_id, event_type, from_status, to_status, metadata, created_at \
+         FROM external_security_report_events \
+         WHERE report_id = $1 ORDER BY created_at ASC",
     )
+    .bind(report_id)
     .fetch_all(get_db())
     .await
 }
 
-pub async fn get_external_reports_by_submitter(submitted_by: Uuid) -> Result<Vec<ExternalReportRow>, sqlx::Error> {
-    sqlx::query_as::<_, ExternalReportRow>(
-        "SELECT id, title, description, submitted_by, security_type, status, incident_report_id, created_at FROM external_reports WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
-    )
+pub async fn get_all_external_reports() -> Result<Vec<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(&format!(
+        "{} WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        EXTERNAL_REPORT_SELECT
+    ))
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_external_reports_by_submitter(
+    submitted_by: Uuid,
+) -> Result<Vec<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(&format!(
+        "{} WHERE submitted_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        EXTERNAL_REPORT_SELECT
+    ))
     .bind(submitted_by)
     .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_external_report_by_id(
+    report_id: Uuid,
+) -> Result<Option<ExternalReportRow>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportRow>(&format!(
+        "{} WHERE id = $1 AND deleted_at IS NULL",
+        EXTERNAL_REPORT_SELECT
+    ))
+    .bind(report_id)
+    .fetch_optional(get_db())
+    .await
+}
+
+pub async fn get_external_report_public_view(
+    public_token: Uuid,
+) -> Result<Option<ExternalReportPublicView>, sqlx::Error> {
+    sqlx::query_as::<_, ExternalReportPublicView>(
+        "SELECT id, title, status, status_changed_at, public_update_message, \
+                created_at, updated_at \
+         FROM external_reports \
+         WHERE public_token = $1 AND deleted_at IS NULL",
+    )
+    .bind(public_token)
+    .fetch_optional(get_db())
     .await
 }
 

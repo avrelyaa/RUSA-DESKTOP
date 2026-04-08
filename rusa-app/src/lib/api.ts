@@ -163,9 +163,17 @@ export const securityApi = {
   getSecurityTasks: (token: string) => invoke<any[]>('get_security_tasks', { token }),
   updateSecurityTaskStatus: (token: string, taskId: string, status: string) =>
     invoke<void>('update_security_task_status', { token, taskId, status }),
-  submitExternalReport: (token: string, title: string, description: string, securityType?: string) =>
-    invoke<string>('submit_external_report', { token, title, description, securityType }),
+  submitExternalReport: (token: string, title: string, description: string, reporterName?: string, securityType?: string) =>
+    invoke<{ id: string; public_token: string }>('submit_external_report', { token, title, description, reporterName, securityType }),
   getExternalReports: (token: string) => invoke<any[]>('get_external_reports', { token }),
+  updateExternalReportStatus: (token: string, reportId: string, status: string, closedReason?: string, publicUpdateMessage?: string) =>
+    invoke<void>('update_external_report_status', { token, reportId, status, closedReason, publicUpdateMessage }),
+  addExternalReportPublicUpdate: (token: string, reportId: string, message: string) =>
+    invoke<void>('add_external_report_public_update', { token, reportId, message }),
+  getExternalReportStatus: (token: string, publicToken: string) =>
+    invoke<any>('get_external_report_status', { token, publicToken }),
+  getExternalReportEvents: (token: string, reportId: string) =>
+    invoke<any[]>('get_external_report_events', { token, reportId }),
 };
 
 export const researchSecurityApi = {
