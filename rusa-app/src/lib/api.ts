@@ -341,6 +341,9 @@ export const sanitaryApi = {
     invoke<string>('create_inspection_report', { token, location, inspectionDate, findings, violations, recommendations }),
   getInspections: (token: string) => invoke<any[]>('get_inspection_reports', { token }),
   sendToHead: (token: string, reportId: string) => invoke<void>('send_inspection_to_head', { token, reportId }),
+  allocateShift: (token: string, staffId: string, shiftStart: string, shiftEnd: string, notes?: string) =>
+    invoke<string>('allocate_sanitary_shift', { token, staffId, shiftStart, shiftEnd, notes }),
+  getShifts: (token: string) => invoke<any[]>('get_sanitary_shifts', { token }),
 };
 
 // Governance

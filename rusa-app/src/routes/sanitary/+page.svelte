@@ -10,9 +10,10 @@
   import { showToast } from '$lib/stores/toast';
   import { onMount } from 'svelte';
 
-  type Tab = 'tasks' | 'nomad_tasks' | 'inventory' | 'disposal' | 'wastewater' | 'inspections';
-  let activeTab = $state<Tab>('tasks');
+  type Tab = 'shifts' | 'tasks' | 'nomad_tasks' | 'inventory' | 'disposal' | 'wastewater' | 'inspections';
+  let activeTab = $state<Tab>('shifts');
 
+  let shifts: any[] = $state([]);
   let tasks: any[] = $state([]);
   let nomadTasks: any[] = $state([]);
   let inventory: any[] = $state([]);
@@ -20,6 +21,13 @@
   let wastewaterLogs: any[] = $state([]);
   let inspections: any[] = $state([]);
   let loading = $state(false);
+
+  // Shift form
+  let shiftOpen = $state(false);
+  let shiftStaffSelected: any = $state(null);
+  let shiftStart = $state('');
+  let shiftEnd = $state('');
+  let shiftNotes = $state('');
 
   // Task form
   let taskOpen = $state(false);
@@ -81,7 +89,8 @@
     const s = $session; if (!s) return;
     loading = true;
     try {
-      [tasks, nomadTasks, inventory, disposalLogs, wastewaterLogs, inspections] = await Promise.all([
+      [shifts, tasks, nomadTasks, inventory, disposalLogs, wastewaterLogs, inspections] = await Promise.all([
+        sanitaryApi.getShifts(s.token),
         sanitaryApi.getTasks(s.token),
         governanceApi.getNomadTasks(s.token),
         sanitaryApi.getInventory(s.token),
@@ -93,6 +102,17 @@
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
+
+  async function allocateShift() {
+    const s = $session; if (!s) return;
+    if (!shiftStaffSelected || !shiftStart || !shiftEnd) { showToast('Staff member, start, and end required', 'error'); return; }
+    try {
+      await sanitaryApi.allocateShift(s.token, shiftStaffSelected.id, shiftStart, shiftEnd, shiftNotes || undefined);
+      showToast('Shift allocated', 'success');
+      shiftOpen = false; shiftStaffSelected = null; shiftStart = ''; shiftEnd = ''; shiftNotes = '';
+      shifts = await sanitaryApi.getShifts(s.token);
+    } catch (e: any) { showToast('Failed: ' + e, 'error'); }
+  }
 
   async function assignTask() {
     const s = $session; if (!s) return;
@@ -181,6 +201,12 @@
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
+  const shiftCols = [
+    { key: 'staff_id', label: 'Staff ID' },
+    { key: 'shift_start', label: 'Start' },
+    { key: 'shift_end', label: 'End' },
+    { key: 'notes', label: 'Notes' },
+  ];
   const taskCols = [
     { key: 'title', label: 'Task' },
     { key: 'assigned_to_name', label: 'Assigned To' },
@@ -220,9 +246,10 @@
 
 <svelte:head><title>RUSA IMS — Sanitary & Waste</title></svelte:head>
 
-<PageShell title="Sanitary & Waste Management" subtitle="Tasks, inventory, disposal logs, wastewater, and inspections">
+<PageShell title="Sanitary & Waste Management" subtitle="Shifts, tasks, inventory, disposal logs, wastewater, and inspections">
   <div class="tabs">
-    <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
+    <button class="tab" class:active={activeTab==='shifts'} onclick={() => activeTab='shifts'}>{isHead ? 'Shifts' : 'My Schedule'}</button>
+    <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>{isHead ? 'Tasks' : 'My Tasks'}</button>
     {#if isHead}
       <button class="tab" class:active={activeTab==='nomad_tasks'} onclick={() => activeTab='nomad_tasks'}>My Nomad Tasks</button>
     {/if}
@@ -234,6 +261,18 @@
 
   {#if loading}
     <p class="loading">Loading...</p>
+  {:else if activeTab === 'shifts'}
+    <div class="section-bar">
+      <h2 class="section-title">{isHead ? 'Staff Shifts' : 'My Schedule'}</h2>
+      {#if isHead}
+        <button class="btn-primary" onclick={() => shiftOpen = true}>+ Allocate Shift</button>
+      {/if}
+    </div>
+    {#if shifts.length === 0}
+      <p class="empty">{isHead ? 'No shifts allocated yet.' : 'No shifts have been assigned to you yet.'}</p>
+    {:else}
+      <Table columns={shiftCols} rows={shifts} />
+    {/if}
   {:else if activeTab === 'tasks'}
     <div class="section-bar">
       <h2 class="section-title">{isHead ? 'All Sanitary Tasks' : 'My Assigned Tasks'}</h2>
@@ -339,6 +378,22 @@
     <Table columns={inspCols} rows={inspections} />
   {/if}
 </PageShell>
+
+<Modal bind:open={shiftOpen} title="Allocate Shift">
+  <div class="form">
+    <div class="field">
+      <label class="field-label">Staff Member</label>
+      <UserAutocompleteSingle users={allUsers} bind:selected={shiftStaffSelected} />
+    </div>
+    <Field label="Shift Start" type="datetime-local" bind:value={shiftStart} required />
+    <Field label="Shift End" type="datetime-local" bind:value={shiftEnd} required />
+    <Field label="Notes" type="textarea" bind:value={shiftNotes} />
+    <div class="form-actions">
+      <button class="btn-secondary" onclick={() => { shiftOpen = false; shiftStaffSelected = null; shiftStart = ''; shiftEnd = ''; shiftNotes = ''; }}>Cancel</button>
+      <button class="btn-primary" onclick={allocateShift}>Allocate</button>
+    </div>
+  </div>
+</Modal>
 
 <Modal bind:open={taskOpen} title="Assign Sanitary Task">
   <div class="form">

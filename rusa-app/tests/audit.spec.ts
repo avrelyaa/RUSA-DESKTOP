@@ -268,3 +268,86 @@ test('Settlers: submit anomaly report, view inventory and personnel', async ({ p
   // TODO: adjust selector to match your personnel list component
   await expect(page.locator('table tbody tr, [data-testid="personnel-item"]').first()).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// 5. My Schedule — Medical staff (read-only self-schedule view)
+// ---------------------------------------------------------------------------
+test('Medical staff: can view own schedule and cannot allocate shifts', async ({ page }) => {
+  await login(page, 'medical_staff', 'password');
+
+  await navigateTo(page, 'Medical');
+  await expect(page).toHaveURL(/medical/);
+
+  // The tab label for non-head users should say "My Schedule", not "Shifts"
+  await expect(page.getByRole('button', { name: /my schedule/i })).toBeVisible();
+
+  // Navigate to the My Schedule tab
+  await page.getByRole('button', { name: /my schedule/i }).click();
+  await assertNoErrors(page);
+
+  // The section heading should say "My Schedule"
+  await expect(page.getByText(/my schedule/i)).toBeVisible();
+
+  // The "Allocate Shift" button must NOT be present for standard staff
+  await expect(page.getByRole('button', { name: /allocate shift/i })).toBeHidden();
+});
+
+test('Medical head: can allocate shifts and sees all staff shifts', async ({ page }) => {
+  await login(page, 'head_of_medicine', 'password');
+
+  await navigateTo(page, 'Medical');
+  await expect(page).toHaveURL(/medical/);
+
+  // Head sees the "Shifts" tab label (not "My Schedule")
+  await expect(page.getByRole('button', { name: /^shifts$/i })).toBeVisible();
+
+  // Navigate to the Shifts tab
+  await page.getByRole('button', { name: /^shifts$/i }).click();
+  await assertNoErrors(page);
+
+  // The "+ Allocate Shift" button must be present for heads
+  await expect(page.getByRole('button', { name: /allocate shift/i })).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// 6. My Schedule — Sanitary crew (read-only self-schedule view)
+// ---------------------------------------------------------------------------
+test('Sanitary crew: can view own schedule and cannot allocate shifts', async ({ page }) => {
+  await login(page, 'cleanup_crew', 'password');
+
+  await navigateTo(page, 'Sanitary');
+  await expect(page).toHaveURL(/sanitary/);
+
+  // The tab label for non-head users should say "My Schedule"
+  await expect(page.getByRole('button', { name: /my schedule/i })).toBeVisible();
+
+  // Navigate to the My Schedule tab
+  await page.getByRole('button', { name: /my schedule/i }).click();
+  await assertNoErrors(page);
+
+  // The section heading should say "My Schedule"
+  await expect(page.getByText(/my schedule/i)).toBeVisible();
+
+  // The "Allocate Shift" button must NOT be present for crew members
+  await expect(page.getByRole('button', { name: /allocate shift/i })).toBeHidden();
+});
+
+test('Sanitary head: can allocate shifts and sees all staff shifts', async ({ page }) => {
+  await login(page, 'head_of_sanitary', 'password');
+
+  await navigateTo(page, 'Sanitary');
+  await expect(page).toHaveURL(/sanitary/);
+
+  // Head sees the "Shifts" tab label (not "My Schedule")
+  await expect(page.getByRole('button', { name: /^shifts$/i })).toBeVisible();
+
+  // Navigate to the Shifts tab
+  await page.getByRole('button', { name: /^shifts$/i }).click();
+  await assertNoErrors(page);
+
+  // The "+ Allocate Shift" button must be present for heads
+  await expect(page.getByRole('button', { name: /allocate shift/i })).toBeVisible();
+
+  // The section heading should say "Staff Shifts" for head
+  await expect(page.getByText(/staff shifts/i)).toBeVisible();
+});
