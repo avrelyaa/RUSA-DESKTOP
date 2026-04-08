@@ -75,9 +75,9 @@
       const now = Date.now();
       upcomingShifts = merged
         .filter((shift) => shift.shift_start_ms !== null && shift.shift_start_ms >= now)
-        .sort((a, b) => (a.shift_start_ms ?? 0) - (b.shift_start_ms ?? 0));
+        .sort((a, b) => a.shift_start_ms! - b.shift_start_ms!);
     } catch (e: any) {
-      console.error('Failed to load dashboard data: ' + e);
+      console.error('Failed to load dashboard messages/shifts: ' + e);
     } finally {
       shiftsLoading = false;
     }
