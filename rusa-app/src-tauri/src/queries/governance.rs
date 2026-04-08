@@ -280,8 +280,9 @@ pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
 }
 
 /// After a vote resolves, send an in-app notification message to the initiator
-/// and auto-update any linked general_request to match the vote outcome.
-async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx::Error> {
+/// and auto-update any linked general_request, blueprint_proposal, or budget_request
+/// to match the vote outcome.
+pub async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx::Error> {
     // Fetch vote title and initiator
     let row: Option<(Option<String>, Option<Uuid>)> = sqlx::query_as(
         "SELECT title, initiated_by FROM votes WHERE id = $1",
@@ -309,6 +310,16 @@ async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx
     // Auto-update linked blueprint_proposals
     sqlx::query(
         "UPDATE blueprint_proposals SET status = $1 WHERE vote_id = $2 AND status = 'under_vote'",
+    )
+    .bind(gr_outcome)
+    .bind(vote_id)
+    .execute(get_db())
+    .await
+    .ok();
+
+    // Auto-update linked budget_requests
+    sqlx::query(
+        "UPDATE budget_requests SET status = $1 WHERE vote_id = $2 AND status IN ('pending', 'under_review') AND deleted_at IS NULL",
     )
     .bind(gr_outcome)
     .bind(vote_id)

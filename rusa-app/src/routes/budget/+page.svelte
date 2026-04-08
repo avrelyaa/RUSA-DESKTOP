@@ -243,7 +243,9 @@
                 {#if canInitiateVote && req.status === 'pending' && !req.vote_id}
                   <button class="btn-vote" onclick={() => initiateVoteForRequest(req)}>Initiate Director Vote</button>
                 {/if}
-                {#if (isAccountant || role === 'the_administrator') && (req.status === 'pending' || req.status === 'under_review')}
+                {#if req.vote_id && (req.status === 'pending' || req.status === 'under_review')}
+                  <span class="vote-auto-note">⏳ Awaiting vote result — will auto-resolve</span>
+                {:else if (isAccountant || role === 'the_administrator') && (req.status === 'pending' || req.status === 'under_review')}
                   <button class="btn-primary" onclick={() => openReview(req, 'budget')}>Review</button>
                   <button class="btn-warning-sm" onclick={() => openFlag(req, 'budget')}>Flag</button>
                 {/if}
@@ -378,6 +380,7 @@
   .btn-warning-sm { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.75rem; padding: 0.4rem 0.75rem; }
   .btn-vote { background: rgba(255,200,0,0.1); border: 1px solid rgba(255,200,0,0.4); border-radius: 4px; color: #ffc800; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.05em; padding: 0.4rem 0.75rem; text-transform: uppercase; }
   .btn-vote:hover { background: rgba(255,200,0,0.15); }
+  .vote-auto-note { color: #4a5d82; font-size: 0.75rem; font-style: italic; }
   
   .field { display: flex; flex-direction: column; gap: 0.375rem; }
   .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }

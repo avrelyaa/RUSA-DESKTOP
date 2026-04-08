@@ -1,6 +1,7 @@
 use crate::auth::{permissions, require_role_name, validate_session_command};
 use crate::db;
 use crate::queries::auth::{write_audit_log, write_audit_log_tx};
+use crate::queries::governance as governance_queries;
 use crate::queries::users::{create_user_tx as query_create_user_tx, soft_delete_user};
 use uuid::Uuid;
 
@@ -189,6 +190,9 @@ pub async fn override_vote(
         .execute(db::get_db())
         .await
         .map_err(|e| format!("DB error: {}", e))?;
+
+    // Propagate the override outcome to any linked proposals/requests
+    governance_queries::notify_vote_resolution(vid, &outcome).await.ok();
 
     let _ = write_audit_log(
         Some(session.user_id),
