@@ -282,6 +282,8 @@ pub fn run() {
             commands::sanitary_commands::create_inspection_report,
             commands::sanitary_commands::get_inspection_reports,
             commands::sanitary_commands::send_inspection_to_head,
+            commands::sanitary_commands::allocate_sanitary_shift,
+            commands::sanitary_commands::get_sanitary_shifts,
             // governance
             commands::governance_commands::initiate_vote,
             commands::governance_commands::cast_vote,

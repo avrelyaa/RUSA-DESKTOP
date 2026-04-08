@@ -191,7 +191,7 @@
 
 <PageShell title="Medical Services" subtitle="Staff shifts, tasks, inventory, specializations, and budget">
   <div class="tabs">
-    <button class="tab" class:active={activeTab==='shifts'} onclick={() => activeTab='shifts'}>Shifts</button>
+    <button class="tab" class:active={activeTab==='shifts'} onclick={() => activeTab='shifts'}>{isHead ? 'Shifts' : 'My Schedule'}</button>
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>{isHead ? 'Tasks' : 'My Tasks'}</button>
     <button class="tab" class:active={activeTab==='inventory'} onclick={() => activeTab='inventory'}>Inventory</button>
     <button class="tab" class:active={activeTab==='specializations'} onclick={() => activeTab='specializations'}>Specializations</button>
@@ -202,10 +202,16 @@
     <p class="loading">Loading...</p>
   {:else if activeTab === 'shifts'}
     <div class="section-bar">
-      <h2 class="section-title">Staff Shifts</h2>
-      <button class="btn-primary" onclick={() => shiftOpen = true}>+ Allocate Shift</button>
+      <h2 class="section-title">{isHead ? 'Staff Shifts' : 'My Schedule'}</h2>
+      {#if isHead}
+        <button class="btn-primary" onclick={() => shiftOpen = true}>+ Allocate Shift</button>
+      {/if}
     </div>
-    <Table columns={shiftCols} rows={shifts} />
+    {#if shifts.length === 0}
+      <p class="empty">{isHead ? 'No shifts allocated yet.' : 'No shifts have been assigned to you yet.'}</p>
+    {:else}
+      <Table columns={shiftCols} rows={shifts} />
+    {/if}
   {:else if activeTab === 'tasks'}
     <div class="section-bar">
       <h2 class="section-title">{isHead ? 'Tasks I Assigned' : 'My Assigned Tasks'}</h2>

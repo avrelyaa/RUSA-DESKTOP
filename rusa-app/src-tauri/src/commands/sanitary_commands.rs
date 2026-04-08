@@ -293,3 +293,42 @@ pub async fn send_inspection_to_head(
     let _ = write_audit_log(Some(session.user_id), "SEND_INSPECTION_TO_HEAD", Some("inspection_reports"), Some(rid), None, None).await;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn allocate_sanitary_shift(
+    token: String,
+    staff_id: String,
+    shift_start: String,
+    shift_end: String,
+    notes: Option<String>,
+) -> Result<String, AppError> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "head_of_sanitary")?;
+
+    let sid = Uuid::parse_str(&staff_id).map_err(|_| "Invalid staff ID")?;
+    let sstart = chrono::DateTime::parse_from_rfc3339(&shift_start)
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .map_err(|_| "Invalid shift_start format")?;
+    let send = chrono::DateTime::parse_from_rfc3339(&shift_end)
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .map_err(|_| "Invalid shift_end format")?;
+
+    let id = sanitary_queries::insert_sanitary_shift(sid, sstart, send, notes.as_deref(), session.user_id)
+        .await?;
+
+    let _ = write_audit_log(Some(session.user_id), "ALLOCATE_SANITARY_SHIFT", Some("sanitary_shifts"), Some(id), None, Some(serde_json::json!({ "staff_id": staff_id }))).await;
+    Ok(id.to_string())
+}
+
+#[tauri::command]
+pub async fn get_sanitary_shifts(token: String) -> Result<Vec<serde_json::Value>, AppError> {
+    let session = validate_session_command(&token).await?;
+
+    let rows = if permissions::has_permission(&session.role_name, "head_of_sanitary") {
+        sanitary_queries::get_all_sanitary_shifts().await
+    } else {
+        sanitary_queries::get_user_sanitary_shifts(session.user_id).await
+    }?;
+
+    Ok(rows.into_iter().map(|r| serde_json::to_value(r).unwrap_or_default()).collect())
+}

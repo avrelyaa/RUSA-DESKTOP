@@ -2,6 +2,17 @@ use crate::db::get_db;
 use uuid::Uuid;
 
 #[derive(sqlx::FromRow, serde::Serialize)]
+pub struct SanitaryShiftRow {
+    pub id: Uuid,
+    pub staff_id: Option<Uuid>,
+    pub shift_start: Option<chrono::DateTime<chrono::Utc>>,
+    pub shift_end: Option<chrono::DateTime<chrono::Utc>>,
+    pub notes: Option<String>,
+    pub allocated_by: Option<Uuid>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
 pub struct SanitaryTaskRow {
     pub id: Uuid,
     pub title: String,
@@ -320,4 +331,41 @@ pub async fn send_inspection_to_head(
     .execute(get_db())
     .await?;
     Ok(())
+}
+
+pub async fn insert_sanitary_shift(
+    staff_id: Uuid,
+    shift_start: chrono::DateTime<chrono::Utc>,
+    shift_end: chrono::DateTime<chrono::Utc>,
+    notes: Option<&str>,
+    allocated_by: Uuid,
+) -> Result<Uuid, sqlx::Error> {
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO sanitary_shifts (staff_id, shift_start, shift_end, notes, allocated_by) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+    )
+    .bind(staff_id)
+    .bind(shift_start)
+    .bind(shift_end)
+    .bind(notes)
+    .bind(allocated_by)
+    .fetch_one(get_db())
+    .await?;
+    Ok(row.0)
+}
+
+pub async fn get_all_sanitary_shifts() -> Result<Vec<SanitaryShiftRow>, sqlx::Error> {
+    sqlx::query_as::<_, SanitaryShiftRow>(
+        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM sanitary_shifts WHERE deleted_at IS NULL ORDER BY shift_start DESC",
+    )
+    .fetch_all(get_db())
+    .await
+}
+
+pub async fn get_user_sanitary_shifts(staff_id: Uuid) -> Result<Vec<SanitaryShiftRow>, sqlx::Error> {
+    sqlx::query_as::<_, SanitaryShiftRow>(
+        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM sanitary_shifts WHERE staff_id = $1 AND deleted_at IS NULL ORDER BY shift_start DESC",
+    )
+    .bind(staff_id)
+    .fetch_all(get_db())
+    .await
 }
