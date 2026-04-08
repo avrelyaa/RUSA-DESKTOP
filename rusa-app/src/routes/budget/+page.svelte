@@ -109,10 +109,8 @@
     const s = $session; if (!s) return;
     if (!budgetTitle || !budgetDesc || !budgetAmount || !budgetItems) { showToast('All fields required', 'error'); return; }
     try {
-      const reqId = await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, Number(budgetAmount), budgetItems);
-      // Auto-route to Directors' Voting System
-      await budgetApi.initiateBudgetVote(s.token, reqId);
-      showToast('Budget request submitted and routed to Directors\' Vote', 'success');
+      await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, Number(budgetAmount), budgetItems);
+      showToast('Budget request submitted. The Accountant will review it before routing to Directors\' Vote.', 'success');
       budgetReqOpen = false; budgetTitle = ''; budgetDesc = ''; budgetAmount = ''; budgetItems = '';
       requests = await budgetApi.getBudgetRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
@@ -211,8 +209,7 @@
     <p class="loading">Loading...</p>
   {:else if activeTab === 'requests'}
     <p class="vote-system-note">
-      💰 <strong>Budget requests require a collective directors' vote</strong> before they can be approved.
-      Use "Initiate Director Vote" on any pending request to start the vote. Approval is blocked until the vote passes.
+      💰 <strong>Workflow:</strong> Department heads submit requests → The Accountant reviews for validity → Accountant or Director uses "Initiate Director Vote" → Directors vote at 11:00 and 19:00 sessions → Result returned to requester. Approval is blocked until the vote passes.
     </p>
     {#if requests.length === 0}
       <p class="empty">No budget requests found</p>
