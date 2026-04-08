@@ -558,8 +558,9 @@ pub async fn update_external_report_status(
         return Err("Only security staff can update external report status".to_string());
     }
 
-    // Dismiss requires a reason
-    if status == "DISMISSED" && closed_reason.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+    // Dismiss requires a non-empty reason
+    let reason_is_empty = closed_reason.as_deref().map_or(true, |s| s.trim().is_empty());
+    if status == "DISMISSED" && reason_is_empty {
         return Err("A dismissal reason is required".to_string());
     }
 

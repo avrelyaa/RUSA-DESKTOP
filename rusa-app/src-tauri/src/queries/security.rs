@@ -498,9 +498,14 @@ pub async fn transition_external_report_status(
     };
 
     if !valid {
+        let allowed = match from_status.as_str() {
+            "PENDING_REVIEW"      => "UNDER_INVESTIGATION, DISMISSED",
+            "UNDER_INVESTIGATION" => "CLOSED_RESOLVED, DISMISSED",
+            _ => "none (terminal state)",
+        };
         return Err(sqlx::Error::Protocol(format!(
-            "Invalid transition: {} -> {}",
-            from_status, new_status
+            "Invalid transition from {} to {}. Allowed transitions from {}: {}",
+            from_status, new_status, from_status, allowed
         )));
     }
 

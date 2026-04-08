@@ -83,6 +83,9 @@
   let extStatusView: any = $state(null);
   let extStatusViewOpen = $state(false);
   let extPublicToken = $state('');
+  // Shown after a successful submission so the user can copy their token
+  let extSubmittedTokenModalOpen = $state(false);
+  let extSubmittedToken = $state('');
 
   // Task assignment form (guardian/overseer)
   let taskOpen = $state(false);
@@ -218,9 +221,9 @@
     if (!exTitle || !exDesc) { showToast('Title and description required', 'error'); return; }
     try {
       const result = await securityApi.submitExternalReport(s.token, exTitle, exDesc, exReporterName || undefined, exSecurityType || undefined);
-      extPublicToken = result.public_token;
-      extStatusViewOpen = false;
-      showToast('Report submitted. Your tracking token: ' + result.public_token, 'success');
+      // Show the token in a dedicated modal so the reporter can copy it
+      extSubmittedToken = result.public_token;
+      extSubmittedTokenModalOpen = true;
       externalOpen = false; exTitle = ''; exDesc = ''; exReporterName = ''; exSecurityType = '';
       externalReports = await securityApi.getExternalReports(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
@@ -583,7 +586,7 @@
 
 <Modal bind:open={externalOpen} title="Submit Report to Security">
   <div class="form">
-    <p class="info-text">Use this form to report a security finding or concern. Your report will be reviewed by the security team. You will receive a <strong>tracking token</strong> after submission to follow the status of your report.</p>
+    <p class="info-text">Use this form to report a security finding or concern. Your report will be reviewed by the security team. After submitting, <strong>a tracking token will be displayed — save it</strong> to follow your report status at any time.</p>
     <Field label="Your Name (optional)" bind:value={exReporterName} placeholder="How should we address you?" />
     <Field label="Title" bind:value={exTitle} required />
     <Field label="Description" type="textarea" bind:value={exDesc} required />
@@ -696,6 +699,18 @@
   {/if}
 </Modal>
 
+<Modal bind:open={extSubmittedTokenModalOpen} title="Report Submitted ✓">
+  <div class="form">
+    <p class="info-text">Your security report has been received and is now <strong>Pending Review</strong>.</p>
+    <p class="info-text">Save the tracking token below — you can use it at any time to check the status of your report:</p>
+    <div class="token-box">{extSubmittedToken}</div>
+    <p class="info-text hint-small">Go to the <em>External Reports</em> tab → <em>Track existing report</em> and paste this token to see updates.</p>
+    <div class="form-actions">
+      <button class="btn-primary" onclick={() => extSubmittedTokenModalOpen = false}>Got it</button>
+    </div>
+  </div>
+</Modal>
+
 <Modal bind:open={extStatusViewOpen} title="Your Report Status">
   {#if extStatusView}
     <div class="form">
@@ -769,6 +784,8 @@
   .tl-time { color: #4a5d82; font-size: 0.72rem; }
   .status-guide { background: rgba(61,127,255,0.06); border-left: 3px solid #3d7fff; border-radius: 4px; margin-top: 0.75rem; padding: 0.75rem 1rem; }
   .status-desc { color: #8fa3cc; font-size: 0.85rem; margin: 0.25rem 0 0; }
+  .token-box { background: #0d1626; border: 1px solid #1e2d4a; border-radius: 4px; color: #00d4ff; font-family: 'Space Mono', monospace; font-size: 0.8rem; overflow-wrap: break-word; padding: 0.75rem 1rem; word-break: break-all; }
+  .hint-small { font-size: 0.78rem; color: #4a5d82; }
   .data-table { width: 100%; border-collapse: collapse; font-family: 'Outfit', sans-serif; font-size: 0.85rem; }
   .data-table th { color: #4a5d82; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em; padding: 0.5rem 0.75rem; text-align: left; text-transform: uppercase; border-bottom: 1px solid #1e2d4a; }
   .data-table td { border-bottom: 1px solid #0d1a2e; color: #c8d8f0; padding: 0.6rem 0.75rem; }
