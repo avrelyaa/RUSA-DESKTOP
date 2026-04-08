@@ -45,23 +45,25 @@
       if (hasMedicalShiftAccess()) shiftSources.push({ department: 'medical', request: medicalApi.getShifts(s.token) });
       if (hasSanitaryShiftAccess()) shiftSources.push({ department: 'sanitary', request: sanitaryApi.getShifts(s.token) });
 
-      const [messages, ...shiftResults] = await Promise.all([messageApi.getInbox(s.token), ...shiftSources.map((source) => source.request)]);
+      const [messages, shiftsBySource] = await Promise.all([
+        messageApi.getInbox(s.token),
+        Promise.all(shiftSources.map(async (source) => ({ department: source.department, rows: await source.request })))
+      ]);
       inbox = messages.filter((m: any) => !m.is_broadcast);
       broadcasts = messages.filter((m: any) => m.is_broadcast);
 
       const now = Date.now();
-      const merged = shiftResults.flatMap((rows: any[], index: number) => {
-        const department = shiftSources[index]?.department ?? 'medical';
-        return rows
+      const merged = shiftsBySource.flatMap((source) =>
+        source.rows
           .filter((r: any) => !r.staff_id || r.staff_id === s.user_id)
           .map((r: any) => ({
             id: r.id,
-            department,
+            department: source.department,
             shift_start: r.shift_start ?? null,
             shift_end: r.shift_end ?? null,
             notes: r.notes ?? null
-          }));
-      });
+          }))
+      );
 
       upcomingShifts = merged
         .filter((shift) => {
@@ -69,7 +71,7 @@
           const start = new Date(shift.shift_start).getTime();
           return Number.isFinite(start) && start >= now;
         })
-        .sort((a, b) => (new Date(a.shift_start ?? 0).getTime()) - (new Date(b.shift_start ?? 0).getTime()));
+        .sort((a, b) => (new Date(a.shift_start!).getTime()) - (new Date(b.shift_start!).getTime()));
     } catch (e: any) {
       console.error('Failed to load dashboard data: ' + e);
     } finally {
@@ -158,7 +160,7 @@
             <div class="shift-row">
               <div class="shift-dept">{shift.department === 'medical' ? 'Medical' : 'Sanitary'}</div>
               <div class="shift-time">
-                {shift.shift_start ? new Date(shift.shift_start).toLocaleString() : '—'} → {shift.shift_end ? new Date(shift.shift_end).toLocaleString() : '—'}
+                {new Date(shift.shift_start!).toLocaleString()} → {shift.shift_end ? new Date(shift.shift_end).toLocaleString() : '—'}
               </div>
               <div class="shift-notes">{shift.notes || '—'}</div>
             </div>
