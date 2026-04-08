@@ -1,15 +1,29 @@
 <script lang="ts">
+  type FieldValue = string | number;
+  type FieldOption = { value: string; label: string };
+  type FieldProps = {
+    label?: string;
+    type?: string;
+    value?: FieldValue;
+    placeholder?: string;
+    required?: boolean;
+    rows?: number;
+    options?: FieldOption[];
+    disabled?: boolean;
+    hint?: string;
+  };
+
   let {
     label = '',
     type = 'text',
-    value = $bindable(''),
+    value = $bindable<FieldValue>(''),
     placeholder = '',
     required = false,
     rows = 4,
-    options = [] as { value: string; label: string }[],
+    options = [] as FieldOption[],
     disabled = false,
     hint = ''
-  } = $props();
+  }: FieldProps = $props();
 
   // Generate a stable id from the label for accessibility
   const fieldId = label

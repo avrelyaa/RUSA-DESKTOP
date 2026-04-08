@@ -6,6 +6,7 @@
   import { session } from '$lib/stores/auth';
   import { budgetApi, governanceApi, userApi } from '$lib/api';
   import { showToast } from '$lib/stores/toast';
+  import { canPerform } from '$lib/stores/permissions';
   import { onMount } from 'svelte';
 
   type Tab = 'requests' | 'expenditures';
@@ -17,9 +18,9 @@
 
   const role = $derived($session?.role_name ?? '');
   const tier = $derived($session?.tier ?? 0);
-  const isAccountant = $derived(role === 'the_accountant');
+  const isAccountant = $derived(canPerform($session, 'the_accountant'));
   const canInitiateVote = $derived(isAccountant || tier >= 3);
-  const canSubmitRequests = $derived(tier >= 2 && !isAccountant);
+  const canSubmitRequests = $derived(tier >= 2 && role !== 'the_accountant');
 
   // Review modals
   let reviewOpen = $state(false);
@@ -246,6 +247,7 @@
                 {#if req.vote_id && (req.status === 'pending' || req.status === 'under_review')}
                   <span class="vote-auto-note">⏳ Awaiting vote result — will auto-resolve</span>
                 {:else if (isAccountant || role === 'the_administrator') && (req.status === 'pending' || req.status === 'under_review')}
+                {#if isAccountant && (req.status === 'pending' || req.status === 'under_review')}
                   <button class="btn-primary" onclick={() => openReview(req, 'budget')}>Review</button>
                   <button class="btn-warning-sm" onclick={() => openFlag(req, 'budget')}>Flag</button>
                 {/if}
@@ -280,10 +282,12 @@
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
     <div class="form-actions">
-      {#if (isAccountant || role === 'the_administrator') && reviewType === 'expenditure'}
+      {#if isAccountant && reviewType === 'expenditure'}
         <button class="btn-warning" onclick={() => { reviewOpen = false; invRelated = selectedItem.id; invOpen = true; }}>Submit Investigation</button>
       {/if}
-      <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
+      {#if isAccountant}
+        <button class="btn-warning" onclick={() => { reviewOpen = false; openFlag(selectedItem, reviewType); }}>Flag</button>
+      {/if}
       <button class="btn-secondary" onclick={() => reviewOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitReview}>Submit Review</button>
     </div>
