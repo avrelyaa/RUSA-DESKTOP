@@ -355,12 +355,44 @@ pub async fn update_conclusion_request_review(
     Ok(())
 }
 
+pub async fn update_conclusion_request_review_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: Uuid,
+    decision: &str,
+    reviewed_by: Uuid,
+    review_notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE mission_conclusion_requests SET status = $1, reviewed_by = $2, review_notes = $3 WHERE id = $4 AND deleted_at IS NULL",
+    )
+    .bind(decision)
+    .bind(reviewed_by)
+    .bind(review_notes)
+    .bind(request_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub async fn complete_mission(mission_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE missions SET status = 'completed' WHERE id = $1 AND deleted_at IS NULL",
     )
     .bind(mission_id)
     .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn complete_mission_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    mission_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE missions SET status = 'completed' WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(mission_id)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }
@@ -378,6 +410,19 @@ pub async fn get_conclusion_request_submitter(
     Ok(row.and_then(|(id,)| id))
 }
 
+pub async fn get_conclusion_request_submitter_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let row: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT submitted_by FROM mission_conclusion_requests WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.and_then(|(id,)| id))
+}
+
 /// Increment the mission_counter for a user (called when an astronaut's conclusion is approved).
 pub async fn increment_mission_counter(user_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -385,6 +430,19 @@ pub async fn increment_mission_counter(user_id: Uuid) -> Result<(), sqlx::Error>
     )
     .bind(user_id)
     .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn increment_mission_counter_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET mission_counter = mission_counter + 1 WHERE id = $1",
+    )
+    .bind(user_id)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }

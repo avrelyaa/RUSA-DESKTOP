@@ -1,6 +1,7 @@
 use crate::auth::{is_admin, permissions, require_role_name, validate_session_command};
+use crate::db;
 use crate::queries::astronaut as astronaut_queries;
-use crate::queries::auth::write_audit_log;
+use crate::queries::auth::{write_audit_log, write_audit_log_tx};
 use uuid::Uuid;
 
 #[tauri::command]
@@ -348,7 +349,12 @@ pub async fn review_conclusion_request(
         _ => {}
     }
 
-    astronaut_queries::update_conclusion_request_review(
+    let mut tx = db::begin_transaction()
+        .await
+        .map_err(|e| format!("Transaction error: {}", e))?;
+
+    astronaut_queries::update_conclusion_request_review_tx(
+        &mut tx,
         rid,
         &decision,
         session.user_id,
@@ -358,17 +364,20 @@ pub async fn review_conclusion_request(
     .map_err(|e| format!("DB error: {}", e))?;
 
     if decision == "approved" {
-        astronaut_queries::complete_mission(mission_id)
+        astronaut_queries::complete_mission_tx(&mut tx, mission_id)
             .await
             .map_err(|e| format!("DB error: {}", e))?;
 
         // Increment mission_counter for the astronaut who submitted the conclusion request
-        if let Ok(Some(submitter_id)) = astronaut_queries::get_conclusion_request_submitter(rid).await {
-            let _ = astronaut_queries::increment_mission_counter(submitter_id).await;
+        if let Ok(Some(submitter_id)) = astronaut_queries::get_conclusion_request_submitter_tx(&mut tx, rid).await {
+            astronaut_queries::increment_mission_counter_tx(&mut tx, submitter_id)
+                .await
+                .map_err(|e| format!("DB error: {}", e))?;
         }
     }
 
-    let _ = write_audit_log(
+    write_audit_log_tx(
+        &mut tx,
         Some(session.user_id),
         "REVIEW_CONCLUSION_REQUEST",
         Some("mission_conclusion_requests"),
@@ -376,7 +385,12 @@ pub async fn review_conclusion_request(
         None,
         Some(serde_json::json!({ "decision": decision })),
     )
-    .await;
+    .await
+    .map_err(|e| format!("Audit log error: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Commit error: {}", e))?;
 
     Ok(())
 }

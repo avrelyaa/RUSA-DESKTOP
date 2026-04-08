@@ -116,6 +116,23 @@ pub async fn update_budget_request_review(
     Ok(())
 }
 
+pub async fn update_budget_request_review_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: Uuid,
+    status: &str,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE budget_requests SET status = $1, accountant_notes = $2 WHERE id = $3 AND deleted_at IS NULL",
+    )
+    .bind(status)
+    .bind(notes)
+    .bind(request_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub async fn flag_budget_request(
     request_id: Uuid,
     reason: &str,
@@ -203,6 +220,21 @@ pub async fn link_budget_request_to_vote(
     .bind(vote_id)
     .bind(request_id)
     .execute(get_db())
+    .await?;
+    Ok(())
+}
+
+pub async fn link_budget_request_to_vote_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request_id: Uuid,
+    vote_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE budget_requests SET vote_id = $1, requires_vote = TRUE WHERE id = $2 AND deleted_at IS NULL",
+    )
+    .bind(vote_id)
+    .bind(request_id)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }

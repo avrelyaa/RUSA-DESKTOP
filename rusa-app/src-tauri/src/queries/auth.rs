@@ -135,6 +135,32 @@ pub async fn write_audit_log(
     Ok(())
 }
 
+pub async fn write_audit_log_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Option<Uuid>,
+    action: &str,
+    table_name: Option<&str>,
+    record_id: Option<Uuid>,
+    old_data: Option<serde_json::Value>,
+    new_data: Option<serde_json::Value>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO audit_log (user_id, action, table_name, record_id, old_data, new_data)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        "#,
+    )
+    .bind(user_id)
+    .bind(action)
+    .bind(table_name)
+    .bind(record_id)
+    .bind(old_data)
+    .bind(new_data)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 fn generate_token() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
