@@ -38,7 +38,7 @@
   }
 
   function formatShiftTime(dateStr: string | null): string {
-    return dateStr ? new Date(dateStr).toLocaleString() : '—';
+    return dateStr ? new Date(dateStr).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }) : '—';
   }
 
   onMount(async () => {
@@ -74,8 +74,8 @@
 
       const now = Date.now();
       upcomingShifts = merged
-        .filter((shift) => shift.shift_start_ms !== null && shift.shift_start_ms >= now)
-        .sort((a, b) => a.shift_start_ms! - b.shift_start_ms!);
+        .filter((shift): shift is PersonalShift & { shift_start_ms: number } => shift.shift_start_ms !== null && shift.shift_start_ms >= now)
+        .sort((a, b) => a.shift_start_ms - b.shift_start_ms);
     } catch (e: any) {
       console.error('Failed to load dashboard messages/shifts: ' + e);
     } finally {
