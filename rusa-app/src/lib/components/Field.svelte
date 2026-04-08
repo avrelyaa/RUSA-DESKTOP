@@ -1,12 +1,14 @@
 <script lang="ts">
+  type FieldOption = { value: string; label: string };
+
   let {
     label = '',
     type = 'text',
-    value = $bindable(''),
+    value = $bindable('' as any),
     placeholder = '',
     required = false,
     rows = 4,
-    options = [] as { value: string; label: string }[],
+    options = [] as FieldOption[],
     disabled = false,
     hint = ''
   } = $props();

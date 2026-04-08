@@ -36,6 +36,7 @@
     canPerform($session, 'the_taskmaster')
   );
   let convertTaskOpen = $state(false);
+  let ctSourceMsgId = $state('');
   let ctTitle = $state('');
   let ctDesc = $state('');
   let ctAssigneeSelected: any = $state(null);
