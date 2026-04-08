@@ -26,6 +26,7 @@ pub struct ExpenditureReportRow {
     pub status: Option<String>,
     pub reported_by: Option<Uuid>,
     pub is_flagged: Option<bool>,
+    pub accountant_notes: Option<String>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -131,7 +132,7 @@ pub async fn flag_budget_request(
 
 pub async fn get_all_expenditure_reports() -> Result<Vec<ExpenditureReportRow>, sqlx::Error> {
     sqlx::query_as::<_, ExpenditureReportRow>(
-        "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, created_at FROM expenditure_reports WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, accountant_notes, created_at FROM expenditure_reports WHERE deleted_at IS NULL ORDER BY created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -141,11 +142,27 @@ pub async fn get_user_expenditure_reports(
     user_id: Uuid,
 ) -> Result<Vec<ExpenditureReportRow>, sqlx::Error> {
     sqlx::query_as::<_, ExpenditureReportRow>(
-        "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, created_at FROM expenditure_reports WHERE reported_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT id, title, description, total_amount, items, invoice_data, status, reported_by, is_flagged, accountant_notes, created_at FROM expenditure_reports WHERE reported_by = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
     )
     .bind(user_id)
     .fetch_all(get_db())
     .await
+}
+
+pub async fn update_expenditure_report_review(
+    report_id: Uuid,
+    status: &str,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE expenditure_reports SET status = $1, accountant_notes = $2 WHERE id = $3 AND deleted_at IS NULL",
+    )
+    .bind(status)
+    .bind(notes)
+    .bind(report_id)
+    .execute(get_db())
+    .await?;
+    Ok(())
 }
 
 pub async fn flag_expenditure_report(

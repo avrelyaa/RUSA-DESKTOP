@@ -305,6 +305,7 @@ pub fn run() {
             // budget
             commands::budget_commands::get_budget_requests,
             commands::budget_commands::review_budget_request,
+            commands::budget_commands::review_expenditure_report,
             commands::budget_commands::flag_budget_request,
             commands::budget_commands::get_expenditure_reports,
             commands::budget_commands::flag_expenditure_report,

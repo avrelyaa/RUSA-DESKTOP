@@ -128,6 +128,35 @@ pub async fn initiate_budget_vote(
 }
 
 #[tauri::command]
+pub async fn review_expenditure_report(
+    token: String,
+    report_id: String,
+    status: String,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let session = validate_session_command(&token).await?;
+    require_role_name(&session, "the_accountant")?;
+
+    let rid = Uuid::parse_str(&report_id).map_err(|_| "Invalid report ID".to_string())?;
+
+    // Expenditure reports do not require a directors' vote — review immediately
+    budget_queries::update_expenditure_report_review(rid, &status, notes.as_deref())
+        .await
+        .map_err(|e| format!("DB error: {}", e))?;
+
+    let _ = write_audit_log(
+        Some(session.user_id),
+        "REVIEW_EXPENDITURE_REPORT",
+        Some("expenditure_reports"),
+        Some(rid),
+        None,
+        Some(serde_json::json!({ "status": status })),
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn flag_budget_request(
     token: String,
     request_id: String,

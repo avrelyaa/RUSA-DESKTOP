@@ -84,9 +84,14 @@
     const s = $session; if (!s || !selectedItem) return;
     if (!reviewStatus) { showToast('Status required', 'error'); return; }
     try {
-      await budgetApi.reviewBudget(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+      if (reviewType === 'expenditure') {
+        await budgetApi.reviewExpenditure(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+        expenditures = await budgetApi.getExpenditures(s.token);
+      } else {
+        await budgetApi.reviewBudget(s.token, selectedItem.id, reviewStatus, reviewNotes || undefined);
+        requests = await budgetApi.getBudgetRequests(s.token);
+      }
       showToast('Review submitted', 'success'); reviewOpen = false;
-      requests = await budgetApi.getBudgetRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -109,10 +114,8 @@
     const s = $session; if (!s) return;
     if (!budgetTitle || !budgetDesc || !budgetAmount || !budgetItems) { showToast('All fields required', 'error'); return; }
     try {
-      const reqId = await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, Number(budgetAmount), budgetItems);
-      // Auto-route to Directors' Voting System
-      await budgetApi.initiateBudgetVote(s.token, reqId);
-      showToast('Budget request submitted and routed to Directors\' Vote', 'success');
+      await budgetApi.submitBudgetRequest(s.token, budgetTitle, budgetDesc, Number(budgetAmount), budgetItems);
+      showToast('Budget request submitted. The Accountant will review it before routing to Directors\' Vote.', 'success');
       budgetReqOpen = false; budgetTitle = ''; budgetDesc = ''; budgetAmount = ''; budgetItems = '';
       requests = await budgetApi.getBudgetRequests(s.token);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
@@ -211,8 +214,7 @@
     <p class="loading">Loading...</p>
   {:else if activeTab === 'requests'}
     <p class="vote-system-note">
-      💰 <strong>Budget requests require a collective directors' vote</strong> before they can be approved.
-      Use "Initiate Director Vote" on any pending request to start the vote. Approval is blocked until the vote passes.
+      💰 <strong>Workflow:</strong> Department heads submit requests → The Accountant reviews for validity → Accountant or Director uses "Initiate Director Vote" → Directors vote at 11:00 and 19:00 sessions → Result returned to requester. Approval is blocked until the vote passes.
     </p>
     {#if requests.length === 0}
       <p class="empty">No budget requests found</p>
@@ -256,20 +258,22 @@
   {/if}
 </PageShell>
 
-<Modal bind:open={reviewOpen} title="Review: {selectedItem?.title}">
+<Modal bind:open={reviewOpen} title="{reviewType === 'expenditure' ? 'Review Report' : 'Review Request'}: {selectedItem?.title}">
   <div class="form">
     <p class="info-text">Amount: <strong>{selectedItem?.amount || selectedItem?.total_amount}</strong></p>
-    {#if selectedItem?.vote_id}
-      <p class="vote-requirement-note">
-        🗳 This budget request has a linked directors' vote. <strong>Approval requires the vote to have passed.</strong>
-        If the vote has not passed, the approval will be blocked.
-      </p>
-    {:else}
-      <p class="vote-warning-note">
-        ⚠ <strong>No directors' vote is linked to this request.</strong>
-        Per RUSA policy, budget requests require a collective directors' vote before approval.
-        Close this review and use "Initiate Director Vote" first.
-      </p>
+    {#if reviewType === 'budget'}
+      {#if selectedItem?.vote_id}
+        <p class="vote-requirement-note">
+          🗳 This budget request has a linked directors' vote. <strong>Approval requires the vote to have passed.</strong>
+          If the vote has not passed, the approval will be blocked.
+        </p>
+      {:else}
+        <p class="vote-warning-note">
+          ⚠ <strong>No directors' vote is linked to this request.</strong>
+          Per RUSA policy, budget requests require a collective directors' vote before approval.
+          Close this review and use "Initiate Director Vote" first.
+        </p>
+      {/if}
     {/if}
     <Field label="Decision" type="select" bind:value={reviewStatus} options={statusOpts} required />
     <Field label="Notes" type="textarea" bind:value={reviewNotes} />
