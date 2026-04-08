@@ -464,7 +464,7 @@
                 {/if}
               {:else if vote.status === 'interrupted'}
                 <div class="interrupted-notice">
-                  <span class="interrupted-label">🚨 Administrator Intervened</span>
+                  <span class="interrupted-label">🚨 The Administrator Has Intervened</span>
                   <span class="interrupted-sub">Awaiting The Administrator's executive decision</span>
                 </div>
                 {#if isAdministrator}
@@ -595,7 +595,7 @@
   <div class="form">
     <div class="admin-override-banner">
       🔐 <strong>Administrator Executive Override</strong>
-      <p class="admin-override-desc">This action is exclusive to The Administrator. It immediately forces the vote to the selected outcome, bypassing the standard directors' quorum requirement. This override is logged and cannot be undone.</p>
+      <p class="admin-override-desc">This action is exclusive to The Administrator. It immediately forces the vote to the selected outcome, bypassing the standard directors' quorum requirement. This override is permanent and cannot be reversed through the UI.</p>
     </div>
     <Field label="Forced Outcome" type="select" bind:value={overrideOutcome} options={[{value:'passed',label:'Passed — Approve linked proposals'},{value:'failed',label:'Failed — Reject linked proposals'}]} required />
     <div class="form-actions">

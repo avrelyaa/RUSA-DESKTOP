@@ -280,7 +280,7 @@ pub async fn resolve_expired_votes() -> Result<(), sqlx::Error> {
 }
 
 /// After a vote resolves, send an in-app notification message to the initiator
-/// and auto-update any linked general_request, blueprint_proposal, or budget_request
+/// and auto-update any linked general_requests, blueprint_proposals, or budget_requests
 /// to match the vote outcome.
 pub async fn notify_vote_resolution(vote_id: Uuid, outcome: &str) -> Result<(), sqlx::Error> {
     // Fetch vote title and initiator
