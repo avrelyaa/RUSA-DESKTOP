@@ -84,6 +84,11 @@
   const isTaskManager = $derived(
     canPerform($session, 'the_guardian') || canPerform($session, 'the_overseer')
   );
+  const roleName = $derived($session?.role_name ?? '');
+  const isGalacticSecurityView = $derived(
+    roleName === 'galactic_security_head' || roleName === 'galactic_security_staff'
+  );
+  const canViewLostFound = $derived(!isGalacticSecurityView);
   const isSecurityStaff = $derived(
     canPerform($session, 'the_guardian') ||
     canPerform($session, 'the_overseer') ||
@@ -92,6 +97,12 @@
     canPerform($session, 'galactic_security_head') ||
     canPerform($session, 'galactic_security_staff')
   );
+
+  $effect(() => {
+    if (!canViewLostFound && activeTab === 'lostfound') {
+      activeTab = 'incidents';
+    }
+  });
 
   onMount(async () => {
     const s = $session; if (!s) return;
@@ -257,7 +268,9 @@
 <PageShell title="Security Operations" subtitle="Incident reports, lost & found, broadcasts, security findings, tasks, and external reports">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='incidents'} onclick={() => activeTab='incidents'}>Incidents</button>
-    <button class="tab" class:active={activeTab==='lostfound'} onclick={() => activeTab='lostfound'}>Lost & Found</button>
+    {#if canViewLostFound}
+      <button class="tab" class:active={activeTab==='lostfound'} onclick={() => activeTab='lostfound'}>Lost & Found</button>
+    {/if}
     <button class="tab" class:active={activeTab==='broadcasts'} onclick={() => activeTab='broadcasts'}>Broadcasts</button>
     <button class="tab" class:active={activeTab==='findings'} onclick={() => activeTab='findings'}>Findings</button>
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>Tasks</button>
@@ -272,7 +285,7 @@
       <button class="btn-primary" onclick={() => incidentOpen = true}>+ Report Incident</button>
     </div>
     <Table columns={incidentCols} rows={incidents} />
-  {:else if activeTab === 'lostfound'}
+  {:else if activeTab === 'lostfound' && canViewLostFound}
     <div class="section-bar">
       <h2 class="section-title">Lost & Found</h2>
       <button class="btn-primary" onclick={() => lfOpen = true}>+ Log Item</button>

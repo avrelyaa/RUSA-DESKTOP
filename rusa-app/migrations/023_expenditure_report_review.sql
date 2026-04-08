@@ -1,3 +1,4 @@
+-- Migration 023: Expenditure Report Review
 -- Add accountant_notes to expenditure_reports for review feedback
 ALTER TABLE expenditure_reports ADD COLUMN IF NOT EXISTS accountant_notes TEXT;
 
