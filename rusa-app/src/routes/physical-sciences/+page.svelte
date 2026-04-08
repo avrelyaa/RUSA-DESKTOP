@@ -18,6 +18,7 @@
   let experiments: any[] = $state([]);
   let tests: any[] = $state([]);
   let helpRequests: any[] = $state([]);
+  let assignedExperimentTasks: any[] = $state([]);
   let allUsers: any[] = $state([]);
   let loading = $state(false);
 
@@ -143,6 +144,29 @@
     return u ? (u.full_name ?? u.username ?? userId) : userId;
   }
 
+  async function loadAssignedExperimentTasks(token: string, rows: any[]) {
+    const me = $session?.user_id;
+    if (!me || rows.length === 0) {
+      assignedExperimentTasks = [];
+      return;
+    }
+
+    const grouped = await Promise.all(
+      rows.map(async (exp: any) => {
+        try {
+          const tasks = await researchApi.getExperimentTasks(token, exp.id);
+          return tasks
+            .filter((t: any) => t.assigned_to === me)
+            .map((t: any) => ({ ...t, experiment_title: exp.title, experiment_status: exp.status }));
+        } catch {
+          return [];
+        }
+      })
+    );
+
+    assignedExperimentTasks = grouped.flat();
+  }
+
   onMount(async () => {
     const s = $session;
     if (!s) return;
@@ -158,6 +182,7 @@
       ]);
       // Filter to only new_matter type experiments
       experiments = experiments.filter((e: any) => e.experiment_type === 'new_matter');
+      await loadAssignedExperimentTasks(s.token, experiments);
     } catch (e: any) { showToast('Failed to load: ' + e, 'error'); }
     loading = false;
   });
@@ -177,6 +202,7 @@
       expOpen = false; expTitle = ''; expDesc = ''; expStart = ''; expEnd = '';
       const all = await researchApi.getExperiments(s.token);
       experiments = all.filter((e: any) => e.experiment_type === 'new_matter');
+      await loadAssignedExperimentTasks(s.token, experiments);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -367,20 +393,20 @@
 
 <PageShell title="Physical Sciences" subtitle="Matter archive, new matter experiments, test archive, and help requests">
   <div class="tabs">
-    <button class="tab" class:active={activeTab==='matter_archive'} onclick={() => activeTab='matter_archive'}>Matter Archive</button>
+    <button class="tab" class:active={activeTab==='matter_archive'} onclick={() => activeTab='matter_archive'}>Matter</button>
     <button class="tab" class:active={activeTab==='experiments'} onclick={() => activeTab='experiments'}>
-      Experiments
+      Assigned Tasks (Experiments)
       {#if pendingConclusions.length > 0 && isObserver}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
     </button>
-    <button class="tab" class:active={activeTab==='tests'} onclick={() => activeTab='tests'}>Test Archive</button>
+    <button class="tab" class:active={activeTab==='tests'} onclick={() => activeTab='tests'}>Test</button>
     <button class="tab" class:active={activeTab==='help_requests'} onclick={() => activeTab='help_requests'}>
-      Help Requests
+      Help Request
       {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}
         <span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>
       {/if}
     </button>
     <button class="tab" class:active={activeTab==='security_reports'} onclick={() => activeTab='security_reports'}>
-      Security Reports
+      Security Report
     </button>
     {#if isObserver}
       <button class="tab" class:active={activeTab==='observer_dashboard'} onclick={() => activeTab='observer_dashboard'}>
@@ -394,7 +420,7 @@
 
   {:else if activeTab === 'matter_archive'}
     <div class="section-bar">
-      <h2 class="section-title">Matter Archive</h2>
+      <h2 class="section-title">Matter</h2>
       <p class="access-note" style="margin:0">New matter is added only upon Observer-approved experiment conclusions.</p>
     </div>
     {#if matters.length === 0}
@@ -432,11 +458,44 @@
 
   {:else if activeTab === 'experiments'}
     <div class="section-bar">
-      <h2 class="section-title">New Matter Experiments</h2>
+      <h2 class="section-title">Assigned Tasks (Experiments)</h2>
       {#if isChemist}
-        <button class="btn-primary" onclick={() => expOpen = true}>+ Propose Experiment</button>
+        <button class="btn-primary" onclick={() => expOpen = true}>+ Matter Proposal / Experiment Proposal</button>
       {/if}
     </div>
+    <p class="access-note">🧾 Your assigned experiment tasks appear first. Open the experiment workspace to submit Task Progress Reports and Task Conclusion requests.</p>
+    {#if assignedExperimentTasks.length === 0}
+      <p class="empty">No assigned experiment tasks yet.</p>
+    {:else}
+      <div class="table-wrap" style="margin-bottom:0.9rem;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Status</th>
+              <th>Experiment</th>
+              <th>Due Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each assignedExperimentTasks as t}
+              <tr>
+                <td>{t.title}</td>
+                <td><span class="badge {expStatusClass(t.status)}">{t.status ?? 'pending'}</span></td>
+                <td>{t.experiment_title ?? '—'}</td>
+                <td>{t.due_date ? new Date(t.due_date).toLocaleDateString() : '—'}</td>
+                <td class="actions-cell">
+                  {#if t.experiment_id}
+                    <button class="btn-small" onclick={() => goto(`/experiments/${t.experiment_id}`)}>Open Workspace</button>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
     <p class="access-note">
       ⚗ Proposing a new matter discovery is treated as an experiment. Each daily log entry <strong>must</strong> reference an approved test from the Test Archive.
       Once concluded, The Observer reviews and officially adds the matter to the archive.
@@ -524,8 +583,8 @@
 
   {:else if activeTab === 'tests'}
     <div class="section-bar">
-      <h2 class="section-title">Test Archive</h2>
-      <button class="btn-primary" onclick={() => testOpen = true}>+ Propose Test</button>
+      <h2 class="section-title">Test</h2>
+      <button class="btn-primary" onclick={() => testOpen = true}>+ Test Proposal</button>
     </div>
     <p class="access-note">
       📋 Chemists and physicists may propose new standardised tests to The Observer if a required procedure is not in the archive. Proposals can be approved or rejected.
@@ -565,9 +624,9 @@
 
   {:else if activeTab === 'help_requests'}
     <div class="section-bar">
-      <h2 class="section-title">Help Requests</h2>
+      <h2 class="section-title">Help Request</h2>
       {#if isChemist}
-        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
+        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Help Request</button>
       {/if}
     </div>
     <WorkspaceList
@@ -600,9 +659,9 @@
 
   {:else if activeTab === 'security_reports'}
     <div class="section-bar">
-      <h2 class="section-title">Security Reports</h2>
+      <h2 class="section-title">Security Report</h2>
       {#if isChemist}
-        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Submit Security Report</button>
+        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Security Report</button>
       {/if}
     </div>
     <p class="access-note">🔒 Reports are routed directly to security staff. You can only view reports that you submitted.</p>
@@ -703,7 +762,7 @@
 </PageShell>
 
 <!-- Propose Experiment Modal -->
-<Modal bind:open={expOpen} title="Propose New Matter Experiment">
+<Modal bind:open={expOpen} title="Matter Proposal / Experiment Proposal">
   <div class="form">
     <p class="access-note">🔬 This proposal begins the pipeline for discovering a new matter. Once approved and conducted, you will submit daily logs (each must reference an approved test) and a final conclusion document.</p>
     <Field label="Title" bind:value={expTitle} required />
@@ -712,13 +771,13 @@
     <Field label="End Date (optional)" type="date" bind:value={expEnd} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => expOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={proposeExperiment}>Submit Proposal</button>
+      <button class="btn-primary" onclick={proposeExperiment}>Submit Matter Proposal</button>
     </div>
   </div>
 </Modal>
 
 <!-- Propose Test Modal -->
-<Modal bind:open={testOpen} title="Propose New Test">
+<Modal bind:open={testOpen} title="Test Proposal">
   <div class="form">
     <p class="access-note">📋 Propose a standardised test to The Observer. Once approved it can be referenced in daily experiment logs.</p>
     <Field label="Title" bind:value={testTitle} required />
@@ -726,7 +785,7 @@
     <Field label="Methodology / Procedure" type="textarea" bind:value={testMethod} rows={4} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => testOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={proposeTest}>Submit Proposal</button>
+      <button class="btn-primary" onclick={proposeTest}>Submit Test Proposal</button>
     </div>
   </div>
 </Modal>
@@ -755,7 +814,7 @@
 </Modal>
 
 <!-- Help Request Modal -->
-<Modal bind:open={helpReqOpen} title="Send Help Request">
+<Modal bind:open={helpReqOpen} title="Help Request">
   <div class="form">
     <p class="access-note">🔀 This request will be automatically routed to <strong>The Observer</strong> as your proxy director.</p>
     <Field label="Title" bind:value={hrTitle} required />
@@ -803,7 +862,7 @@
     {/if}
     <p class="access-note" style="background:rgba(0,200,83,0.06);border-color:rgba(0,200,83,0.2);color:#00c853">✅ Approving will create an assigned research task for the selected subordinate.</p>
     <div class="field">
-      <label class="field-label">Assign Task To</label>
+      <span class="field-label">Assign Task To</span>
       <select class="field-input" bind:value={helpApproveAssigneeId}>
         <option value="">— Select user —</option>
         {#each allUsers as u}
@@ -832,7 +891,7 @@
   </div>
 </Modal>
 
-<Modal bind:open={secReportOpen} title="Submit Security Report">
+<Modal bind:open={secReportOpen} title="Security Report">
   <div class="form">
     <Field label="Title" bind:value={secTitle} required />
     <Field label="Category" type="select" bind:value={secCategory} options={secCategoryOpts} />

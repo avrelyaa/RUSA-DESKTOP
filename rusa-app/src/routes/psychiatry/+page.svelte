@@ -216,10 +216,7 @@
 
 <Modal bind:open={registerOpen} title="Register Patient">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Patient User</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={patientSelected} />
-    </div>
+    <UserAutocompleteSingle label="Patient User" users={allUsers} bind:selected={patientSelected} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => { registerOpen = false; patientSelected = null; }}>Cancel</button>
       <button class="btn-primary" onclick={registerPatient}>Register</button>
@@ -229,10 +226,7 @@
 
 <Modal bind:open={apptOpen} title="Schedule Appointment">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Patient User</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={apptPatientSelected} />
-    </div>
+    <UserAutocompleteSingle label="Patient User" users={allUsers} bind:selected={apptPatientSelected} />
     <Field label="Scheduled Time" type="datetime-local" bind:value={apptTime} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => { apptOpen = false; apptPatientSelected = null; }}>Cancel</button>
@@ -254,10 +248,7 @@
 
 <Modal bind:open={taskOpen} title="Assign Psychiatry Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={tTitle} required />
     <Field label="Description" type="textarea" bind:value={tDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={tDue} />

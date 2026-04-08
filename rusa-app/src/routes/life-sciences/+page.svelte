@@ -517,14 +517,14 @@
 <PageShell title="Life Sciences" subtitle="New species experiments, species archive, test proposals, and research tasks">
   <div class="tabs">
     <button class="tab" class:active={activeTab==='experiments'} onclick={() => activeTab='experiments'}>Experiments</button>
-    <button class="tab" class:active={activeTab==='species'} onclick={() => activeTab='species'}>Species Archive</button>
-    <button class="tab" class:active={activeTab==='tests'} onclick={() => activeTab='tests'}>Test Archive</button>
+    <button class="tab" class:active={activeTab==='species'} onclick={() => activeTab='species'}>Species</button>
+    <button class="tab" class:active={activeTab==='tests'} onclick={() => activeTab='tests'}>Test</button>
     <button class="tab" class:active={activeTab==='research_tasks'} onclick={() => activeTab='research_tasks'}>
-      {canAssignResearchTasks ? 'Research Tasks' : 'My Research Tasks'}
+      {canAssignResearchTasks ? 'Assigned Tasks (Experiments)' : 'My Assigned Tasks (Experiments)'}
     </button>
     {#if isTaskmaster}
       <button class="tab" class:active={activeTab==='pending_conclusions'} onclick={() => activeTab='pending_conclusions'}>
-        Pending Conclusions {#if pendingConclusions.length > 0}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
+        Task Conclusion {#if pendingConclusions.length > 0}<span class="tab-badge">{pendingConclusions.length}</span>{/if}
       </button>
     {/if}
     {#if isObserver}
@@ -533,10 +533,10 @@
       </button>
     {/if}
     <button class="tab" class:active={activeTab==='help_requests'} onclick={() => activeTab='help_requests'}>
-      Help Requests {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}<span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>{/if}
+      Help Request {#if helpRequests.filter((r: any) => r.status === 'open').length > 0}<span class="tab-badge">{helpRequests.filter((r: any) => r.status === 'open').length}</span>{/if}
     </button>
     <button class="tab" class:active={activeTab==='security_reports'} onclick={() => activeTab='security_reports'}>
-      Security Reports
+      Security Report
     </button>
   </div>
 
@@ -545,7 +545,7 @@
   {:else if activeTab === 'experiments'}
     <div class="section-bar">
       <h2 class="section-title">Experiments</h2>
-      <button class="btn-primary" onclick={() => expOpen = true}>+ Propose Experiment</button>
+      <button class="btn-primary" onclick={() => expOpen = true}>+ Experiment Proposal</button>
     </div>
     <WorkspaceList
       items={filteredExperiments}
@@ -568,12 +568,12 @@
   {:else if activeTab === 'species'}
     <div class="section-bar">
       <h2 class="section-title">
-        Species Archive
+        Species
         {#if isAgriculturalEngineer}
           <span class="plant-only-badge">🌿 Plants Only</span>
         {/if}
       </h2>
-      <button class="btn-primary" onclick={() => { speciesCategory = isAgriculturalEngineer ? 'plant' : 'unknown'; speciesOpen = true; }}>+ Add Species</button>
+      <button class="btn-primary" onclick={() => { speciesCategory = isAgriculturalEngineer ? 'plant' : 'unknown'; speciesOpen = true; }}>+ Species Proposal</button>
     </div>
     {#if isAgriculturalEngineer}
       <p class="access-note">⚠️ Agricultural engineers have access to <strong>plant species only</strong>. New species are pre-categorized as plants.</p>
@@ -628,19 +628,19 @@
     {/if}
   {:else if activeTab === 'tests'}
     <div class="section-bar">
-      <h2 class="section-title">Test Archive</h2>
-      <button class="btn-primary" onclick={() => testOpen = true}>+ Propose Test</button>
+      <h2 class="section-title">Test</h2>
+      <button class="btn-primary" onclick={() => testOpen = true}>+ Test Proposal</button>
     </div>
     <Table columns={testCols} rows={tests} onRowClick={(r) => openReview(r, 'test')} />
   {:else if activeTab === 'research_tasks'}
     <div class="section-bar">
-      <h2 class="section-title">My Research Tasks</h2>
+      <h2 class="section-title">{canAssignResearchTasks ? 'Assigned Tasks (Experiments)' : 'My Assigned Tasks (Experiments)'}</h2>
       {#if canAssignResearchTasks}
         <button class="btn-primary" onclick={() => assignTaskOpen = true}>+ Assign Task</button>
       {/if}
     </div>
     {#if myResearchTasks.length === 0}
-      <p class="empty">No research tasks have been assigned to you.</p>
+      <p class="empty">No assigned tasks have been given to you.</p>
     {:else}
       <div class="table-wrap">
         <table class="data-table">
@@ -662,7 +662,7 @@
                 <td>{task.result_notes ?? '—'}</td>
                 <td>
                   {#if task.status === 'pending' || task.status === 'in_progress'}
-                    <button class="btn-small" onclick={() => openResultModal(task)}>Submit Result</button>
+                    <button class="btn-small" onclick={() => openResultModal(task)}>Task Progress Report</button>
                   {/if}
                   {#if canAssignResearchTasks && task.status === 'result_submitted'}
                     <button class="btn-small" onclick={() => completeTask(task)}>Mark Complete</button>
@@ -714,10 +714,10 @@
     {/if}
   {:else if activeTab === 'pending_conclusions'}
     <div class="section-bar">
-      <h2 class="section-title">Pending Experiment Conclusions</h2>
+      <h2 class="section-title">Task Conclusion</h2>
     </div>
     {#if pendingConclusions.length === 0}
-      <p class="empty">No experiment conclusions pending approval.</p>
+      <p class="empty">No task conclusions pending approval.</p>
     {:else}
       <div class="exp-card-list">
         {#each pendingConclusions as exp}
@@ -819,9 +819,9 @@
 
   {:else if activeTab === 'help_requests'}
     <div class="section-bar">
-      <h2 class="section-title">Help Requests</h2>
+      <h2 class="section-title">Help Request</h2>
       {#if isResearchEngineer}
-        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Send Help Request</button>
+        <button class="btn-primary" onclick={() => helpReqOpen = true}>+ Help Request</button>
       {/if}
     </div>
     {#if isResearchEngineer}
@@ -856,9 +856,9 @@
     />
   {:else if activeTab === 'security_reports'}
     <div class="section-bar">
-      <h2 class="section-title">Security Reports</h2>
+      <h2 class="section-title">Security Report</h2>
       {#if canPerform($session, 'biologist') || canPerform($session, 'biological_engineer') || canPerform($session, 'agricultural_engineer')}
-        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Submit Security Report</button>
+        <button class="btn-primary" onclick={() => secReportOpen = true}>+ Security Report</button>
       {/if}
     </div>
     <p class="access-note">🔒 Reports are routed directly to security staff. Researchers can only view reports they submitted.</p>
@@ -903,7 +903,7 @@
   {/if}
 </PageShell>
 
-<Modal bind:open={expOpen} title="Propose Experiment">
+<Modal bind:open={expOpen} title="Experiment Proposal">
   <div class="form">
     <Field label="Title" bind:value={expTitle} required />
     <Field label="Description" type="textarea" bind:value={expDesc} required />
@@ -916,7 +916,7 @@
   </div>
 </Modal>
 
-<Modal bind:open={speciesOpen} title="Add Species">
+<Modal bind:open={speciesOpen} title="Species Proposal">
   <div class="form">
     <Field label="Name" bind:value={speciesName} required />
     <Field label="Category" type="select" bind:value={speciesCategory} options={speciesCategoryOpts} />
@@ -925,12 +925,12 @@
     <Field label="Habitat" bind:value={speciesHabitat} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => speciesOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={addSpecies}>Add Species</button>
+      <button class="btn-primary" onclick={addSpecies}>Submit Proposal</button>
     </div>
   </div>
 </Modal>
 
-<Modal bind:open={testOpen} title="Propose Test">
+<Modal bind:open={testOpen} title="Test Proposal">
   <div class="form">
     <Field label="Title" bind:value={testTitle} required />
     <Field label="Description" type="textarea" bind:value={testDesc} />
@@ -964,10 +964,7 @@
 
 <Modal bind:open={assignTaskOpen} title="Assign Research Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={rtTitle} required />
     <Field label="Description" type="textarea" bind:value={rtDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={rtDue} />
@@ -978,18 +975,18 @@
   </div>
 </Modal>
 
-<Modal bind:open={resultOpen} title="Submit Task Result">
+<Modal bind:open={resultOpen} title="Task Progress Report">
   <div class="form">
     <p class="info-text">Task: <strong>{selectedTask?.title}</strong></p>
-    <Field label="Result Notes" type="textarea" bind:value={resultNotes} required />
+    <Field label="Progress Report" type="textarea" bind:value={resultNotes} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => resultOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitResult}>Submit</button>
+      <button class="btn-primary" onclick={submitResult}>Submit Report</button>
     </div>
   </div>
 </Modal>
 
-<Modal bind:open={helpReqOpen} title="Send Help Request">
+<Modal bind:open={helpReqOpen} title="Help Request">
   <div class="form">
     <p class="access-note">🔀 This request will be automatically routed to <strong>The Observer</strong> as proxy director.</p>
     <Field label="Title" bind:value={hrTitle} required />
@@ -997,12 +994,12 @@
     <Field label="Category (optional)" bind:value={hrCategory} placeholder="e.g. equipment, data, guidance" />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpReqOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitHelpRequest}>Send Help Request</button>
+      <button class="btn-primary" onclick={submitHelpRequest}>Submit Request</button>
     </div>
   </div>
 </Modal>
 
-<Modal bind:open={helpResolveOpen} title="Mark Help Request — In Review / Close">
+<Modal bind:open={helpResolveOpen} title="Help Request Resolution">
   <div class="form">
     {#if helpResolveTarget}
       <p class="info-text">Request: <strong>{helpResolveTarget.title}</strong></p>
@@ -1045,10 +1042,7 @@
       {/if}
     {/if}
     <p class="access-note" style="background:rgba(0,200,83,0.06);border-color:rgba(0,200,83,0.2);color:#00c853">✅ Approving will create an assigned research task for the selected subordinate and mark this request as <strong>converted</strong>.</p>
-    <div class="field">
-      <label class="field-label">Assign Task To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign Task To" users={allUsers} bind:selected={helpApproveAssignee} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpApproveOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={submitHelpApprove} disabled={!helpApproveAssignee}>Approve & Create Task</button>
@@ -1073,7 +1067,7 @@
   </div>
 </Modal>
 
-<Modal bind:open={secReportOpen} title="Submit Security Report">
+<Modal bind:open={secReportOpen} title="Security Report">
   <div class="form">
     <Field label="Title" bind:value={secTitle} required />
     <Field label="Category" type="select" bind:value={secCategory} options={secCategoryOpts} />

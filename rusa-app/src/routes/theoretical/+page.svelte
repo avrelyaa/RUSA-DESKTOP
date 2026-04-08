@@ -160,10 +160,7 @@
   <div class="form">
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
-    <div class="field">
-      <label class="field-label">Assign To (optional)</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To (optional)" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Source Message ID" bind:value={aSourceMsg} placeholder="Paste the message ID from the help request" />
     <Field label="Due Date" type="date" bind:value={aDueDate} />
     <div class="form-actions">

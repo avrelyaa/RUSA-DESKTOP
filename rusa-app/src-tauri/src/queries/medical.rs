@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub struct ShiftRow {
     pub id: Uuid,
     pub staff_id: Option<Uuid>,
+    pub staff_name: Option<String>,
     pub shift_start: Option<chrono::DateTime<chrono::Utc>>,
     pub shift_end: Option<chrono::DateTime<chrono::Utc>>,
     pub notes: Option<String>,
@@ -39,6 +40,7 @@ pub struct PatientRecordRow {
 pub struct SpecializationRow {
     pub id: Uuid,
     pub staff_id: Option<Uuid>,
+    pub staff_name: Option<String>,
     pub specialization: String,
     pub certified_at: Option<chrono::NaiveDate>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -48,6 +50,8 @@ pub struct SpecializationRow {
 pub struct PatientRow {
     pub id: Uuid,
     pub patient_id: Uuid,
+    pub patient_name: Option<String>,
+    pub registered_at: Option<chrono::DateTime<chrono::Utc>>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -55,6 +59,7 @@ pub struct PatientRow {
 pub struct AppointmentRow {
     pub id: Uuid,
     pub patient_id: Option<Uuid>,
+    pub patient_name: Option<String>,
     pub scheduled_at: Option<chrono::DateTime<chrono::Utc>>,
     pub status: Option<String>,
     pub findings: Option<String>,
@@ -95,7 +100,7 @@ pub async fn insert_medical_shift(
 
 pub async fn get_all_medical_shifts() -> Result<Vec<ShiftRow>, sqlx::Error> {
     sqlx::query_as::<_, ShiftRow>(
-        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM medical_shifts ORDER BY shift_start DESC",
+        "SELECT m.id, m.staff_id, u.full_name AS staff_name, m.shift_start, m.shift_end, m.notes, m.allocated_by, m.created_at FROM medical_shifts m LEFT JOIN users u ON u.id = m.staff_id ORDER BY m.shift_start DESC",
     )
     .fetch_all(get_db())
     .await
@@ -103,7 +108,7 @@ pub async fn get_all_medical_shifts() -> Result<Vec<ShiftRow>, sqlx::Error> {
 
 pub async fn get_user_medical_shifts(staff_id: Uuid) -> Result<Vec<ShiftRow>, sqlx::Error> {
     sqlx::query_as::<_, ShiftRow>(
-        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM medical_shifts WHERE staff_id = $1 ORDER BY shift_start DESC",
+        "SELECT m.id, m.staff_id, u.full_name AS staff_name, m.shift_start, m.shift_end, m.notes, m.allocated_by, m.created_at FROM medical_shifts m LEFT JOIN users u ON u.id = m.staff_id WHERE m.staff_id = $1 ORDER BY m.shift_start DESC",
     )
     .bind(staff_id)
     .fetch_all(get_db())
@@ -189,7 +194,7 @@ pub async fn insert_staff_specialization(
 
 pub async fn get_all_staff_specializations() -> Result<Vec<SpecializationRow>, sqlx::Error> {
     sqlx::query_as::<_, SpecializationRow>(
-        "SELECT id, staff_id, specialization, certified_at, created_at FROM staff_specializations ORDER BY specialization",
+        "SELECT s.id, s.staff_id, u.full_name AS staff_name, s.specialization, s.certified_at, s.created_at FROM staff_specializations s LEFT JOIN users u ON u.id = s.staff_id ORDER BY s.specialization",
     )
     .fetch_all(get_db())
     .await
@@ -207,7 +212,7 @@ pub async fn insert_psychiatric_patient(patient_id: Uuid) -> Result<Uuid, sqlx::
 
 pub async fn get_all_psychiatric_patients() -> Result<Vec<PatientRow>, sqlx::Error> {
     sqlx::query_as::<_, PatientRow>(
-        "SELECT id, patient_id, created_at FROM psychiatric_patients WHERE deleted_at IS NULL ORDER BY created_at DESC",
+        "SELECT p.id, p.patient_id, u.full_name AS patient_name, p.created_at AS registered_at, p.created_at FROM psychiatric_patients p LEFT JOIN users u ON u.id = p.patient_id WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -231,7 +236,7 @@ pub async fn insert_appointment(
 
 pub async fn get_all_appointments() -> Result<Vec<AppointmentRow>, sqlx::Error> {
     sqlx::query_as::<_, AppointmentRow>(
-        "SELECT id, patient_id, scheduled_at, status, findings, psychiatrist_id, created_at FROM appointments WHERE deleted_at IS NULL ORDER BY scheduled_at DESC",
+        "SELECT a.id, a.patient_id, u.full_name AS patient_name, a.scheduled_at, a.status, a.findings, a.psychiatrist_id, a.created_at FROM appointments a LEFT JOIN users u ON u.id = a.patient_id WHERE a.deleted_at IS NULL ORDER BY a.scheduled_at DESC",
     )
     .fetch_all(get_db())
     .await
@@ -241,7 +246,7 @@ pub async fn get_patient_appointments(
     patient_id: Uuid,
 ) -> Result<Vec<AppointmentRow>, sqlx::Error> {
     sqlx::query_as::<_, AppointmentRow>(
-        "SELECT id, patient_id, scheduled_at, status, findings, psychiatrist_id, created_at FROM appointments WHERE patient_id = $1 AND deleted_at IS NULL ORDER BY scheduled_at DESC",
+        "SELECT a.id, a.patient_id, u.full_name AS patient_name, a.scheduled_at, a.status, a.findings, a.psychiatrist_id, a.created_at FROM appointments a LEFT JOIN users u ON u.id = a.patient_id WHERE a.patient_id = $1 AND a.deleted_at IS NULL ORDER BY a.scheduled_at DESC",
     )
     .bind(patient_id)
     .fetch_all(get_db())

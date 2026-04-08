@@ -5,6 +5,7 @@ use uuid::Uuid;
 pub struct SanitaryShiftRow {
     pub id: Uuid,
     pub staff_id: Option<Uuid>,
+    pub staff_name: Option<String>,
     pub shift_start: Option<chrono::DateTime<chrono::Utc>>,
     pub shift_end: Option<chrono::DateTime<chrono::Utc>>,
     pub notes: Option<String>,
@@ -355,7 +356,7 @@ pub async fn insert_sanitary_shift(
 
 pub async fn get_all_sanitary_shifts() -> Result<Vec<SanitaryShiftRow>, sqlx::Error> {
     sqlx::query_as::<_, SanitaryShiftRow>(
-        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM sanitary_shifts WHERE deleted_at IS NULL ORDER BY shift_start DESC",
+        "SELECT s.id, s.staff_id, u.full_name AS staff_name, s.shift_start, s.shift_end, s.notes, s.allocated_by, s.created_at FROM sanitary_shifts s LEFT JOIN users u ON u.id = s.staff_id WHERE s.deleted_at IS NULL ORDER BY s.shift_start DESC",
     )
     .fetch_all(get_db())
     .await
@@ -363,7 +364,7 @@ pub async fn get_all_sanitary_shifts() -> Result<Vec<SanitaryShiftRow>, sqlx::Er
 
 pub async fn get_user_sanitary_shifts(staff_id: Uuid) -> Result<Vec<SanitaryShiftRow>, sqlx::Error> {
     sqlx::query_as::<_, SanitaryShiftRow>(
-        "SELECT id, staff_id, shift_start, shift_end, notes, allocated_by, created_at FROM sanitary_shifts WHERE staff_id = $1 AND deleted_at IS NULL ORDER BY shift_start DESC",
+        "SELECT s.id, s.staff_id, u.full_name AS staff_name, s.shift_start, s.shift_end, s.notes, s.allocated_by, s.created_at FROM sanitary_shifts s LEFT JOIN users u ON u.id = s.staff_id WHERE s.staff_id = $1 AND s.deleted_at IS NULL ORDER BY s.shift_start DESC",
     )
     .bind(staff_id)
     .fetch_all(get_db())

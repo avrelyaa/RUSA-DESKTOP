@@ -951,10 +951,7 @@
 
 <Modal bind:open={assignTaskOpen} title="Assign Research Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={rtTitle} required />
     <Field label="Description" type="textarea" bind:value={rtDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={rtDue} />
@@ -1168,10 +1165,7 @@
     <div class="info-block">
       <p class="info-text">Experiment: <strong>{assignExpTaskExp?.title ?? '—'}</strong></p>
     </div>
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assignExpTaskAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assignExpTaskAssignee} />
     <Field label="Task Title" bind:value={assignExpTaskTitle} required />
     <Field label="Due Date" type="datetime-local" bind:value={assignExpTaskDue} />
     <div class="form-actions">

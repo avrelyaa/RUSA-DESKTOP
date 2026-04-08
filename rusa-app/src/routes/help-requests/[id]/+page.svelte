@@ -28,7 +28,7 @@
   // Determine which domain page to navigate back to based on the requester's role.
   const backPath = $derived.by(() => {
     const role = $session?.role_name;
-    if (role === 'chemist') return '/chemistry';
+    if (role === 'chemist') return '/physical-sciences';
     if (role === 'physicist') return '/physical-sciences';
     if (role === 'mathematician') return '/mathematics';
     if (role === 'aerospace_engineer') return '/aerospace';
@@ -224,10 +224,7 @@
 
 <Modal bind:open={helpApproveOpen} title="Approve Help Request — Assign Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign Task To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign Task To" users={allUsers} bind:selected={helpApproveAssignee} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpApproveOpen = false}>Cancel</button>
       <button class="btn-primary" onclick={async () => {
@@ -275,12 +272,9 @@
   .readonly-block { background: #05070f; border: 1px solid #1e2d4a; border-radius: 4px; color: #c8d8f0; font-size: 0.85rem; line-height: 1.6; min-height: 60px; padding: 0.625rem 0.875rem; white-space: pre-wrap; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
-  .field { display: flex; flex-direction: column; gap: 0.375rem; }
-  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
-  .btn-observer { background: none; border: 1px solid #f59e0b; border-radius: 4px; color: #f59e0b; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
   .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

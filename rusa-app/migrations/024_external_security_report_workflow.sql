@@ -1,4 +1,4 @@
--- Migration 023: External Security Report Workflow
+-- Migration 024: External Security Report Workflow
 -- Adds proper reporter fields, status lifecycle, public token for reporter tracking,
 -- and an audit-trail events table for external security reports.
 -- Execution date: 2026-04-08

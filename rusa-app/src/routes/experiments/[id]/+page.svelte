@@ -28,7 +28,7 @@
   let activeTab = $state<DetailTab>('overview');
 
   const isChemistryExp = $derived(experiment?.experiment_type === 'new_matter');
-  const backPath = $derived(isChemistryExp ? '/chemistry' : '/research');
+  const backPath = $derived(isChemistryExp ? '/physical-sciences' : '/research');
 
   const canReviewExperiment = $derived(
     isChemistryExp
@@ -67,15 +67,15 @@
       ? [{ label: 'Assign Task', className: 'btn-observer', onClick: () => { assignTaskAssignee = null; assignTaskTitle = ''; assignTaskDue = ''; assignTaskOpen = true; } }]
       : []),
     ...(canRequestConclusion
-      ? [{ label: 'Request Conclusion', className: 'btn-conclude', onClick: () => openConclusionRequest() }]
+      ? [{ label: 'Task Conclusion', className: 'btn-conclude', onClick: () => openConclusionRequest() }]
       : []),
     ...(canReviewConclusion
-      ? [{ label: 'Review Conclusion', className: 'btn-conclude', onClick: () => openConclusionReview() }]
+      ? [{ label: 'Task Conclusion Review', className: 'btn-conclude', onClick: () => openConclusionReview() }]
       : []),
   ]);
   const workspaceTabs = $derived([
     { key: 'overview', label: 'Overview' },
-    { key: 'activity_logs', label: 'Activity Logs', count: logs.length },
+    { key: 'activity_logs', label: 'Experiment Logs', count: logs.length },
   ]);
 
   // Review modal
@@ -377,7 +377,7 @@
           s.token, experiment.id, conclusionDecision, conclusionReviewNotes || undefined,
         );
       }
-      showToast(conclusionDecision === 'approve' ? 'Conclusion approved' : 'Conclusion rejected', 'success');
+      showToast(conclusionDecision === 'approve' ? 'Task conclusion approved' : 'Task conclusion rejected', 'success');
       conclusionReviewOpen = false;
       await refreshExperiment();
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
@@ -475,9 +475,9 @@
 
         {:else if activeTab === 'activity_logs'}
       <div class="section-bar">
-        <h2 class="section-title">Activity Logs</h2>
+        <h2 class="section-title">Experiment Logs</h2>
         {#if canAddLog}
-          <button class="btn-primary" onclick={openAddLog}>+ Log</button>
+          <button class="btn-primary" onclick={openAddLog}>+ Task Progress Report</button>
         {/if}
       </div>
       {#if logsLoading}
@@ -541,10 +541,7 @@
     <div class="info-block">
       <p class="info-text">Experiment: <strong>{experiment?.title ?? '—'}</strong></p>
     </div>
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assignTaskAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assignTaskAssignee} />
     <Field label="Task Title" bind:value={assignTaskTitle} required />
     <Field label="Due Date" type="datetime-local" bind:value={assignTaskDue} />
     <div class="form-actions">
@@ -555,19 +552,19 @@
 </Modal>
 
 <!-- Add Log Modal -->
-<Modal bind:open={logOpen} title="Add Daily Log — {experiment?.title ?? ''}">
+<Modal bind:open={logOpen} title="Task Progress Report (Experiment Log) — {experiment?.title ?? ''}">
   <div class="form">
     {#if isChemistryExp}
       <p class="access-note">⚠️ Each log entry must reference an approved test from the Test Archive.</p>
       <div class="field">
-        <label class="field-label">Matter Being Tested</label>
+        <span class="field-label">Matter Being Tested</span>
         <div class="readonly-block">{experiment?.title ?? '—'}{#if experiment?.description} — {experiment.description.slice(0, 120)}{experiment.description.length > 120 ? '…' : ''}{/if}</div>
       </div>
     {/if}
     <Field label="Log Date" type="datetime-local" bind:value={logDate} required />
     {#if isChemistryExp}
       <div class="field">
-        <label class="field-label">Linked Test (required) *</label>
+        <span class="field-label">Linked Test (required) *</span>
         <select class="field-input" bind:value={chemLogLinkedTestId}>
           <option value="">— Select an approved test —</option>
           {#each approvedTests as t}
@@ -579,7 +576,7 @@
         {/if}
       </div>
       <div class="field">
-        <label class="field-label">Test Outcome (required) *</label>
+        <span class="field-label">Test Outcome (required) *</span>
         <select class="field-input" bind:value={logTestOutcome}>
           <option value="">— Select outcome —</option>
           <option value="successful">Successful</option>
@@ -609,7 +606,7 @@
       <Field label="Species / Matter Tested" bind:value={logSpecies} placeholder="What was tested today" />
     {/if}
     <div class="field">
-      <label class="field-label">Personnel Present</label>
+      <span class="field-label">Personnel Present</span>
       <div class="personnel-multi">
         {#each allUsers as u}
           <label class="test-check-item">
@@ -630,9 +627,9 @@
         {/if}
       </div>
     </div>
-    <Field label="Notes / Progress" type="textarea" bind:value={logNotes} rows={3} />
+    <Field label="Task Progress Report" type="textarea" bind:value={logNotes} rows={3} />
     <div class="field">
-      <label class="field-label">Attachments / Raw Data</label>
+      <span class="field-label">Attachments / Raw Data</span>
       <input class="field-input" type="file" multiple
         onchange={(e) => { const input = e.target as HTMLInputElement; logAttachmentFiles = input.files ? Array.from(input.files) : []; }} />
       {#if logAttachmentFiles.length > 0}
@@ -670,7 +667,7 @@
 </Modal>
 
 <!-- Conclusion Request Modal -->
-<Modal bind:open={conclusionReqOpen} title="Request Conclusion — {experiment?.title ?? ''}">
+<Modal bind:open={conclusionReqOpen} title="Task Conclusion — {experiment?.title ?? ''}">
   <div class="form">
     {#if isChemistryExp}
       <p class="access-note">📄 Submit your final conclusion document describing the matter's properties. The Observer will review and officially add it to the Matter Archive upon approval.</p>
@@ -683,13 +680,13 @@
     <Field label="Limitations (optional)" type="textarea" bind:value={conclusionLimitations} rows={3} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => conclusionReqOpen = false}>Cancel</button>
-      <button class="btn-primary" onclick={submitConclusionRequest}>Submit Conclusion Request</button>
+      <button class="btn-primary" onclick={submitConclusionRequest}>Submit Task Conclusion</button>
     </div>
   </div>
 </Modal>
 
 <!-- Conclusion Review Modal -->
-<Modal bind:open={conclusionReviewOpen} title="Review Conclusion — {experiment?.title ?? ''}">
+<Modal bind:open={conclusionReviewOpen} title="Task Conclusion Review — {experiment?.title ?? ''}">
   <div class="form">
     {#if conclusionReviewLoading}
       <p class="info-text">Loading…</p>
@@ -779,16 +776,6 @@
 </Modal>
 
 <style>
-  .meta-tag {
-    border-radius: 3px;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.65rem;
-    letter-spacing: 0.05em;
-    padding: 0.2rem 0.5rem;
-    text-transform: uppercase;
-  }
-  .tag-type { background: rgba(61,127,255,0.1); color: #8fa3cc; }
-  .tag-date { background: rgba(0,212,255,0.08); color: #8fa3cc; }
   /* header + tabs styles moved to WorkspaceDetail component */
   .overview-grid { display: flex; flex-direction: column; gap: 1rem; }
   .detail-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; }
@@ -808,22 +795,11 @@
   .log-field { color: #c8d8f0; font-size: 0.85rem; margin: 0.2rem 0 0; }
   .test-linked { color: #a78bfa; }
   .discovery-badge { background: rgba(0,200,83,0.08); border-radius: 3px; color: #00c853; display: inline-block; font-size: 0.8rem; padding: 2px 6px; }
-  .badge { border-radius: 3px; font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.05em; padding: 0.2rem 0.5rem; text-transform: uppercase; }
-  .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
-  .badge-approved { background: rgba(0,200,83,0.12); color: #00c853; }
-  .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
-  .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
-  .badge-rejected { background: rgba(255,68,102,0.12); color: #ff4466; }
-  .badge-conclude { background: rgba(124,58,237,0.15); color: #a78bfa; }
   .form { display: flex; flex-direction: column; gap: 1rem; }
   .form-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem; }
   .btn-primary { background: linear-gradient(135deg, #3d7fff, #00d4ff); border: none; border-radius: 4px; color: #05070f; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-secondary { background: none; border: 1px solid #1e2d4a; border-radius: 4px; color: #8fa3cc; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
-  .btn-observer { background: none; border: 1px solid #f59e0b; border-radius: 4px; color: #f59e0b; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
-  .btn-observer:hover { border-color: #fbbf24; color: #fbbf24; }
-  .btn-conclude { background: none; border: 1px solid #7c3aed; border-radius: 4px; color: #a78bfa; cursor: pointer; font-size: 0.85rem; padding: 0.625rem 1.25rem; }
-  .btn-conclude:hover { border-color: #a78bfa; color: #c4b5fd; }
   .btn-danger { background: linear-gradient(135deg, #dc2626, #ef4444); border: none; border-radius: 4px; color: #fff; cursor: pointer; font-family: 'Space Mono', monospace; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; padding: 0.625rem 1.25rem; }
   .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
   .field { display: flex; flex-direction: column; gap: 0.375rem; }

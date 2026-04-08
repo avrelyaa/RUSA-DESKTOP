@@ -597,10 +597,7 @@
 <!-- Assign Task Modal -->
 <Modal bind:open={assignOpen} title="Assign Research Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To (optional)</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To (optional)" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
     <Field label="Due Date" type="date" bind:value={aDue} />
@@ -722,10 +719,7 @@
 <Modal bind:open={helpApproveOpen} title="Approve Help Request">
   <div class="form">
     <p class="vote-note">Approving will convert this help request into a research task. Select a mathematician to assign it to.</p>
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={helpApproveAssignee} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => { helpApproveOpen = false; helpApproveAssignee = null; }}>Cancel</button>
       <button class="btn-primary" onclick={submitHelpApprove}>Approve & Assign</button>
@@ -748,25 +742,29 @@
 <Modal bind:open={secReportOpen} title="Submit Security Report">
   <div class="form">
     <Field label="Title" bind:value={secTitle} required />
-    <div class="field">
-      <label class="field-label">Category</label>
-      <select class="field-input" bind:value={secCategory}>
-        <option>Equipment Damage</option>
-        <option>Safety Violation</option>
-        <option>Unauthorized Access</option>
-        <option>Data Breach</option>
-        <option>Other</option>
-      </select>
-    </div>
-    <div class="field">
-      <label class="field-label">Severity</label>
-      <select class="field-input" bind:value={secSeverity}>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-        <option value="critical">Critical</option>
-      </select>
-    </div>
+    <Field
+      label="Category"
+      type="select"
+      bind:value={secCategory}
+      options={[
+        { value: 'Equipment Damage', label: 'Equipment Damage' },
+        { value: 'Safety Violation', label: 'Safety Violation' },
+        { value: 'Unauthorized Access', label: 'Unauthorized Access' },
+        { value: 'Data Breach', label: 'Data Breach' },
+        { value: 'Other', label: 'Other' },
+      ]}
+    />
+    <Field
+      label="Severity"
+      type="select"
+      bind:value={secSeverity}
+      options={[
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'critical', label: 'Critical' },
+      ]}
+    />
     <Field label="Description" type="textarea" bind:value={secDesc} rows={4} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => secReportOpen = false}>Cancel</button>

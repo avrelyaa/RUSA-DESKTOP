@@ -46,6 +46,7 @@ pub struct MeetingRow {
 pub struct RelocationRow {
     pub id: Uuid,
     pub staff_id: Option<Uuid>,
+    pub staff_name: Option<String>,
     pub to_location: String,
     pub relocation_type: Option<String>,
     pub start_date: Option<chrono::NaiveDate>,
@@ -508,7 +509,7 @@ pub async fn insert_staff_relocation(
 
 pub async fn get_all_relocations() -> Result<Vec<RelocationRow>, sqlx::Error> {
     sqlx::query_as::<_, RelocationRow>(
-        "SELECT id, staff_id, to_location, relocation_type, start_date, end_date, reason, requested_by, created_at FROM staff_relocations ORDER BY created_at DESC",
+        "SELECT r.id, r.staff_id, u.full_name AS staff_name, r.to_location, r.relocation_type, r.start_date, r.end_date, r.reason, r.requested_by, r.created_at FROM staff_relocations r LEFT JOIN users u ON u.id = r.staff_id ORDER BY r.created_at DESC",
     )
     .fetch_all(get_db())
     .await

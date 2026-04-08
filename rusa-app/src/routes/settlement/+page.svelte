@@ -306,10 +306,7 @@
 
 <Modal bind:open={taskOpen} title="Assign Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={tTitle} required />
     <Field label="Description" type="textarea" bind:value={tDesc} />
     <Field label="Due Date" type="date" bind:value={tDue} />
@@ -371,10 +368,7 @@
 <Modal bind:open={troublesomeOpen} title="Report Troublesome Settler">
   <div class="form">
     <p class="info-text">Report a settler who is causing trouble to the Settler Commander. The Commander may place them on house arrest and request deportation.</p>
-    <div class="field">
-      <label class="field-label">Settler to Report</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={trSettlerSelected} placeholder="Search settler by name or username…" />
-    </div>
+    <UserAutocompleteSingle label="Settler to Report" users={allUsers} bind:selected={trSettlerSelected} placeholder="Search settler by name or username…" />
     <Field label="Description" type="textarea" bind:value={trDesc} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => { troublesomeOpen = false; trSettlerSelected = null; trDesc = ''; }}>Cancel</button>
@@ -388,10 +382,7 @@
     <Field label="Title" bind:value={ciTitle} required />
     <Field label="Description of Work Done" type="textarea" bind:value={ciContent} required />
     <Field label="Materials Used" type="textarea" bind:value={ciMaterials} hint="List each material on a new line (e.g. Steel beams, Concrete, Glass panels)" />
-    <div class="field">
-      <label class="field-label">Progress Percentage</label>
-      <input class="field-input" type="number" min="0" max="100" bind:value={ciProgress} placeholder="0–100" />
-    </div>
+    <Field label="Progress Percentage" type="number" bind:value={ciProgress} placeholder="0–100" />
     <Field label="Problems Encountered" type="textarea" bind:value={ciProblems} />
     <Field label="Plans for Next Steps" type="textarea" bind:value={ciPlans} />
     <div class="form-actions">

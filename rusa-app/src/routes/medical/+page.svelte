@@ -85,7 +85,9 @@
     const s = $session; if (!s) return;
     if (!shiftStaffSelected || !shiftStart || !shiftEnd) { showToast('Staff User, start, and end required', 'error'); return; }
     try {
-      await medicalApi.allocateShift(s.token, shiftStaffSelected.id, shiftStart, shiftEnd, shiftNotes || undefined);
+      const startIso = new Date(shiftStart).toISOString();
+      const endIso = new Date(shiftEnd).toISOString();
+      await medicalApi.allocateShift(s.token, shiftStaffSelected.id, startIso, endIso, shiftNotes || undefined);
       showToast('Shift allocated', 'success');
       shiftOpen = false; shiftStaffSelected = null; shiftStart = ''; shiftEnd = ''; shiftNotes = '';
       shifts = await medicalApi.getShifts(s.token);
@@ -191,7 +193,7 @@
 
 <PageShell title="Medical Services" subtitle="Staff shifts, tasks, inventory, specializations, and budget">
   <div class="tabs">
-    <button class="tab" class:active={activeTab==='shifts'} onclick={() => activeTab='shifts'}>{isHead ? 'Shifts' : 'My Schedule'}</button>
+    <button class="tab" class:active={activeTab==='shifts'} onclick={() => activeTab='shifts'}>Shifts</button>
     <button class="tab" class:active={activeTab==='tasks'} onclick={() => activeTab='tasks'}>{isHead ? 'Tasks' : 'My Tasks'}</button>
     <button class="tab" class:active={activeTab==='inventory'} onclick={() => activeTab='inventory'}>Inventory</button>
     <button class="tab" class:active={activeTab==='specializations'} onclick={() => activeTab='specializations'}>Specializations</button>
@@ -202,7 +204,7 @@
     <p class="loading">Loading...</p>
   {:else if activeTab === 'shifts'}
     <div class="section-bar">
-      <h2 class="section-title">{isHead ? 'Staff Shifts' : 'My Schedule'}</h2>
+      <h2 class="section-title">Staff Shifts</h2>
       {#if isHead}
         <button class="btn-primary" onclick={() => shiftOpen = true}>+ Allocate Shift</button>
       {/if}
@@ -272,10 +274,7 @@
 
 <Modal bind:open={shiftOpen} title="Allocate Shift">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Staff User</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={shiftStaffSelected} />
-    </div>
+        <UserAutocompleteSingle label="Staff User" users={allUsers} bind:selected={shiftStaffSelected} />
     <Field label="Shift Start" type="datetime-local" bind:value={shiftStart} required />
     <Field label="Shift End" type="datetime-local" bind:value={shiftEnd} required />
     <Field label="Notes" type="textarea" bind:value={shiftNotes} />
@@ -288,10 +287,7 @@
 
 <Modal bind:open={taskOpen} title="Assign Medical Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={tTitle} required />
     <Field label="Description" type="textarea" bind:value={tDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={tDue} />
@@ -330,10 +326,7 @@
 
 <Modal bind:open={specOpen} title="Add Specialization">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Staff User</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={specStaffSelected} />
-    </div>
+    <UserAutocompleteSingle label="Staff User" users={allUsers} bind:selected={specStaffSelected} />
     <Field label="Specialization" bind:value={specName} required placeholder="e.g. Surgery, Neurology" />
     <Field label="Certification Date" type="date" bind:value={specDate} />
     <div class="form-actions">

@@ -38,6 +38,7 @@ pub struct BroadcastRequestRow {
     pub routed_to: Option<String>,
     pub status: Option<String>,
     pub requested_by: Option<Uuid>,
+    pub requester_name: Option<String>,
     pub reviewed_by: Option<Uuid>,
     pub review_notes: Option<String>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -162,7 +163,7 @@ pub async fn insert_broadcast_request(
 }
 
 pub async fn get_broadcast_requests(routed_to_role: Option<&str>) -> Result<Vec<BroadcastRequestRow>, sqlx::Error> {
-    let mut query = "SELECT id, title, content, target_audience, target_filters, routed_to, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE deleted_at IS NULL".to_string();
+    let mut query = "SELECT b.id, b.title, b.content, b.target_audience, b.target_filters, b.routed_to, b.status, b.requested_by, u.full_name AS requester_name, b.reviewed_by, b.review_notes, b.created_at FROM broadcast_requests b LEFT JOIN users u ON u.id = b.requested_by WHERE b.deleted_at IS NULL".to_string();
     
     if routed_to_role.is_some() {
         query.push_str(" AND routed_to = $1");
@@ -180,7 +181,7 @@ pub async fn get_broadcast_requests(routed_to_role: Option<&str>) -> Result<Vec<
 
 pub async fn get_broadcast_request_by_id(request_id: Uuid) -> Result<Option<BroadcastRequestRow>, sqlx::Error> {
     sqlx::query_as::<_, BroadcastRequestRow>(
-        "SELECT id, title, content, target_audience, target_filters, routed_to, status, requested_by, reviewed_by, review_notes, created_at FROM broadcast_requests WHERE id = $1 AND deleted_at IS NULL",
+        "SELECT b.id, b.title, b.content, b.target_audience, b.target_filters, b.routed_to, b.status, b.requested_by, u.full_name AS requester_name, b.reviewed_by, b.review_notes, b.created_at FROM broadcast_requests b LEFT JOIN users u ON u.id = b.requested_by WHERE b.id = $1 AND b.deleted_at IS NULL",
     )
     .bind(request_id)
     .fetch_optional(get_db())

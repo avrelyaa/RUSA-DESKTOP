@@ -720,6 +720,49 @@ pub async fn submit_security_report(
     .await
     .map_err(|e| format!("DB error: {}", e))?;
 
+    // Mirror research-origin security reports into external_reports so
+    // security operations can triage them from the External Reports queue.
+    let reporter_email: Option<String> = sqlx::query_scalar(
+        "SELECT email FROM users WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(session.user_id)
+    .fetch_optional(crate::db::get_db())
+    .await
+    .unwrap_or(None);
+
+    let ext_description = format!(
+        "Category: {}\nSeverity: {}\n\n{}",
+        category,
+        severity,
+        description
+    );
+
+    if let Ok((ext_id, _)) = security_queries::insert_external_report(
+        &title,
+        &ext_description,
+        session.user_id,
+        Some(session.full_name.as_str()),
+        reporter_email.as_deref(),
+        Some("earth"),
+    )
+    .await
+    {
+        let _ = security_queries::insert_external_report_event(
+            ext_id,
+            Some(session.user_id),
+            "CREATED",
+            None,
+            Some("PENDING_REVIEW"),
+            Some(serde_json::json!({
+                "source": "research_security_report",
+                "security_report_id": id,
+                "category": category,
+                "severity": severity
+            })),
+        )
+        .await;
+    }
+
     let _ = write_audit_log(
         Some(session.user_id),
         "SUBMIT_SECURITY_REPORT",

@@ -613,10 +613,7 @@
 
 <Modal bind:open={taskOpen} title="Assign Security Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={taskAssigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={taskAssigneeSelected} />
     <Field label="Task Title" bind:value={taskTitle} required />
     <Field label="Description" type="textarea" bind:value={taskDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={taskDue} />

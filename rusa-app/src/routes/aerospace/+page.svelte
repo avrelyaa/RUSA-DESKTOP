@@ -796,10 +796,7 @@
 
 <Modal bind:open={assignOpen} title="Assign Aerospace Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={aTitle} required />
     <Field label="Description" type="textarea" bind:value={aDesc} />
     <Field label="Due Date" type="datetime-local" bind:value={aDue} />
@@ -970,10 +967,7 @@
       {/if}
     {/if}
     <p class="vote-system-note">✅ Approving will create an assigned task in Aerospace Tasks for the selected subordinate and mark this request as <strong>converted</strong>.</p>
-    <div class="field">
-      <label class="field-label">Assign Task To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={helpApproveAssignee} />
-    </div>
+    <UserAutocompleteSingle label="Assign Task To" users={allUsers} bind:selected={helpApproveAssignee} />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => helpApproveOpen = false}>Cancel</button>
       <button class="btn-approve" onclick={submitHelpApprove} disabled={!helpApproveAssignee}>Approve & Create Task</button>

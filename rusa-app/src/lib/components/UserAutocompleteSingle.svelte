@@ -3,6 +3,8 @@
     users = [] as any[],
     selected = $bindable(null as any),
     placeholder = 'Search by name or username…',
+    label = '',
+    required = false,
   } = $props();
 
   let search = $state('');
@@ -28,18 +30,43 @@
 </script>
 
 <div class="assignee-autocomplete">
-  {#if selected}
-    <span class="token">
-      {selected.full_name || selected.username}
-      <button class="token-remove" onclick={clear}>×</button>
-    </span>
+  {#if label}
+    <label class="field-label">
+      <span>
+        {label}{#if required}<span class="required">*</span>{/if}
+      </span>
+      <div class="autocomplete-wrap">
+        {#if selected}
+          <span class="token">
+            {selected.full_name || selected.username}
+            <button class="token-remove" type="button" onclick={clear}>×</button>
+          </span>
+        {/if}
+        <input class="field-input" bind:value={search} {placeholder} style:display={selected ? 'none' : undefined} />
+        {#if !selected && suggestions.length > 0}
+          <div class="suggestions">
+            {#each suggestions as u}
+              <button class="suggestion-item" type="button" onclick={() => selectUser(u)}>
+                {u.full_name || u.username} <span class="suggestion-role">@{u.username}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </label>
   {:else}
+    {#if selected}
+      <span class="token">
+        {selected.full_name || selected.username}
+        <button class="token-remove" type="button" onclick={clear}>×</button>
+      </span>
+    {/if}
     <div class="autocomplete-wrap">
-      <input class="field-input" bind:value={search} {placeholder} />
-      {#if suggestions.length > 0}
+      <input class="field-input" bind:value={search} {placeholder} style:display={selected ? 'none' : undefined} />
+      {#if !selected && suggestions.length > 0}
         <div class="suggestions">
           {#each suggestions as u}
-            <button class="suggestion-item" onclick={() => selectUser(u)}>
+            <button class="suggestion-item" type="button" onclick={() => selectUser(u)}>
               {u.full_name || u.username} <span class="suggestion-role">@{u.username}</span>
             </button>
           {/each}
@@ -51,6 +78,17 @@
 
 <style>
   .assignee-autocomplete { position: relative; }
+  .field-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8fa3cc;
+  }
+  .required { color: #ff4466; margin-left: 2px; }
   .autocomplete-wrap { position: relative; }
   .field-input {
     background: #05070f;

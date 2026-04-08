@@ -107,7 +107,9 @@
     const s = $session; if (!s) return;
     if (!shiftStaffSelected || !shiftStart || !shiftEnd) { showToast('Staff member, start, and end required', 'error'); return; }
     try {
-      await sanitaryApi.allocateShift(s.token, shiftStaffSelected.id, shiftStart, shiftEnd, shiftNotes || undefined);
+      const startIso = new Date(shiftStart).toISOString();
+      const endIso = new Date(shiftEnd).toISOString();
+      await sanitaryApi.allocateShift(s.token, shiftStaffSelected.id, startIso, endIso, shiftNotes || undefined);
       showToast('Shift allocated', 'success');
       shiftOpen = false; shiftStaffSelected = null; shiftStart = ''; shiftEnd = ''; shiftNotes = '';
       shifts = await sanitaryApi.getShifts(s.token);
@@ -202,7 +204,7 @@
   }
 
   const shiftCols = [
-    { key: 'staff_id', label: 'Staff ID' },
+    { key: 'staff_name', label: 'Staff' },
     { key: 'shift_start', label: 'Start' },
     { key: 'shift_end', label: 'End' },
     { key: 'notes', label: 'Notes' },
@@ -381,10 +383,7 @@
 
 <Modal bind:open={shiftOpen} title="Allocate Shift">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Staff Member</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={shiftStaffSelected} />
-    </div>
+    <UserAutocompleteSingle label="Staff Member" users={allUsers} bind:selected={shiftStaffSelected} />
     <Field label="Shift Start" type="datetime-local" bind:value={shiftStart} required />
     <Field label="Shift End" type="datetime-local" bind:value={shiftEnd} required />
     <Field label="Notes" type="textarea" bind:value={shiftNotes} />
@@ -397,10 +396,7 @@
 
 <Modal bind:open={taskOpen} title="Assign Sanitary Task">
   <div class="form">
-    <div class="field">
-      <label class="field-label">Assign To</label>
-      <UserAutocompleteSingle users={allUsers} bind:selected={assigneeSelected} />
-    </div>
+    <UserAutocompleteSingle label="Assign To" users={allUsers} bind:selected={assigneeSelected} />
     <Field label="Title" bind:value={tTitle} required />
     <Field label="Description" type="textarea" bind:value={tDesc} />
     <Field label="Division" bind:value={tDivision} placeholder="e.g. cleanup, disposal" />
@@ -523,6 +519,4 @@
   .badge-open { background: rgba(0,212,255,0.12); color: #00d4ff; }
   .badge-progress { background: rgba(255,193,7,0.12); color: #ffc107; }
   .badge-done { background: rgba(0,200,83,0.12); color: #00c853; }
-  .field { display: flex; flex-direction: column; gap: 0.375rem; }
-  .field-label { font-family: 'Space Mono', monospace; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8fa3cc; }
 </style>

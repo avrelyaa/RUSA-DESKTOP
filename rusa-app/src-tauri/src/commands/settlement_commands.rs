@@ -20,6 +20,7 @@ struct SettlerTaskRow {
     description: Option<String>,
     status: Option<String>,
     assigned_to: Option<Uuid>,
+    assigned_to_name: Option<String>,
     assigned_by: Option<Uuid>,
     settlement_id: Option<Uuid>,
     due_date: Option<chrono::NaiveDate>,
@@ -84,11 +85,11 @@ pub async fn get_settler_tasks(token: String) -> Result<Vec<serde_json::Value>, 
 
     let rows = if permissions::has_permission(&session.role_name, "settler_commander") || session.tier >= 3 {
         sqlx::query_as::<_, SettlerTaskRow>(
-            "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT t.id, t.title, t.description, t.status, t.assigned_to, u.full_name AS assigned_to_name, t.assigned_by, t.settlement_id, t.due_date, t.progress_notes, t.created_at FROM settler_tasks t LEFT JOIN users u ON u.id = t.assigned_to WHERE t.deleted_at IS NULL ORDER BY t.created_at DESC"
         ).fetch_all(db::get_db()).await
     } else {
         sqlx::query_as::<_, SettlerTaskRow>(
-            "SELECT id, title, description, status, assigned_to, assigned_by, settlement_id, due_date, progress_notes, created_at FROM settler_tasks WHERE assigned_to = $1 AND deleted_at IS NULL ORDER BY created_at DESC"
+            "SELECT t.id, t.title, t.description, t.status, t.assigned_to, u.full_name AS assigned_to_name, t.assigned_by, t.settlement_id, t.due_date, t.progress_notes, t.created_at FROM settler_tasks t LEFT JOIN users u ON u.id = t.assigned_to WHERE t.assigned_to = $1 AND t.deleted_at IS NULL ORDER BY t.created_at DESC"
         ).bind(session.user_id).fetch_all(db::get_db()).await
     }.map_err(|e| format!("DB error: {}", e))?;
 
