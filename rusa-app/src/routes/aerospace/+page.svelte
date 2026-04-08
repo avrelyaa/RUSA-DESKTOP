@@ -640,7 +640,9 @@
                 </td>
                 <td>{bp.created_at ? new Date(bp.created_at).toLocaleDateString() : '—'}</td>
                 <td>
-                  {#if isDirector && (bp.status === 'under_vote' || bp.status === 'pending')}
+                  {#if bp.vote_id && bp.status === 'under_vote'}
+                    <span class="vote-auto-note">⏳ Under vote — auto-resolves</span>
+                  {:else if isDirector && (bp.status === 'under_vote' || bp.status === 'pending')}
                     <button class="btn-small" onclick={() => openBlueprintReview(bp)}>Review</button>
                   {/if}
                   {#if bp.review_notes}
@@ -1075,6 +1077,7 @@
   .vote-type-blueprint { background: rgba(156,39,176,0.15); color: #ce93d8; }
   .vote-badge { font-family: 'Space Mono', monospace; font-size: 0.65rem; }
   .vote-badge-linked { color: #ce93d8; }
+  .vote-auto-note { color: #4a5d82; font-size: 0.75rem; font-style: italic; }
   .vote-system-note { color: #8fa3cc; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem; background: rgba(61,127,255,0.05); border: 1px solid #1e2d4a; border-radius: 4px; padding: 0.6rem 0.75rem; }
   .review-notes { cursor: help; }
   .btn-conclude { border-color: #ce93d8; color: #ce93d8; }

@@ -191,7 +191,10 @@
       await adminApi.overrideVote(s.token, overrideVote.id, overrideOutcome);
       showToast(`Vote overridden → ${overrideOutcome}`, 'success');
       overrideOpen = false;
-      votes = await governanceApi.getVotes(s.token);
+      [votes, generalRequests] = await Promise.all([
+        governanceApi.getVotes(s.token),
+        generalApi.getGeneralRequests(s.token),
+      ]);
     } catch (e: any) { showToast('Failed: ' + e, 'error'); }
   }
 
@@ -459,6 +462,14 @@
                   <button class="btn-warn" onclick={() => interruptVote(vote)}>Interrupt</button>
                   <button class="btn-danger" onclick={() => { overrideVote = vote; overrideOutcome = 'passed'; overrideOpen = true; }}>Override</button>
                 {/if}
+              {:else if vote.status === 'interrupted'}
+                <div class="interrupted-notice">
+                  <span class="interrupted-label">🚨 The Administrator Has Intervened</span>
+                  <span class="interrupted-sub">Awaiting The Administrator's executive decision</span>
+                </div>
+                {#if isAdministrator}
+                  <button class="btn-danger" onclick={() => { overrideVote = vote; overrideOutcome = 'passed'; overrideOpen = true; }}>Executive Override</button>
+                {/if}
               {/if}
             </div>
           </div>
@@ -498,7 +509,7 @@
               {#if req.vote_id}
                 <span class="vote-type-badge vote-type-general">🗳 Under Director Vote</span>
               {/if}
-              {#if isDirectorOrAbove && (req.status === 'under_vote' || req.status === 'pending')}
+              {#if isDirectorOrAbove && !req.vote_id && (req.status === 'under_vote' || req.status === 'pending')}
                 <button class="btn-primary" onclick={() => { selectedGenReq = req; genReviewStatus = ''; genReviewNotes = ''; reviewGenOpen = true; }}>Review</button>
               {/if}
             </div>
@@ -580,13 +591,16 @@
   </div>
 </Modal>
 
-<Modal bind:open={overrideOpen} title="Override Vote: {overrideVote?.title}">
+<Modal bind:open={overrideOpen} title="⚡ Executive Administrator Override: {overrideVote?.title}">
   <div class="form">
-    <div class="warning-box">⚠ Administrator override will immediately force the vote to a specific outcome, bypassing the quorum requirement.</div>
-    <Field label="Forced Outcome" type="select" bind:value={overrideOutcome} options={[{value:'passed',label:'Passed'},{value:'failed',label:'Failed'}]} required />
+    <div class="admin-override-banner">
+      🔐 <strong>Administrator Executive Override</strong>
+      <p class="admin-override-desc">This action is exclusive to The Administrator. It immediately forces the vote to the selected outcome, bypassing the standard directors' quorum requirement. This override is permanent and cannot be reversed through the UI.</p>
+    </div>
+    <Field label="Forced Outcome" type="select" bind:value={overrideOutcome} options={[{value:'passed',label:'Passed — Approve linked proposals'},{value:'failed',label:'Failed — Reject linked proposals'}]} required />
     <div class="form-actions">
       <button class="btn-secondary" onclick={() => overrideOpen = false}>Cancel</button>
-      <button class="btn-danger" onclick={submitOverrideVote}>Force Override</button>
+      <button class="btn-danger" onclick={submitOverrideVote}>Execute Override</button>
     </div>
   </div>
 </Modal>
@@ -826,6 +840,11 @@
   .info-text { color: #8fa3cc; font-size: 0.88rem; margin: 0; }
   .quorum-note { background: rgba(61,127,255,0.07); border: 1px solid rgba(61,127,255,0.2); border-radius: 4px; color: #8fa3cc; font-size: 0.8rem; margin: 0; padding: 0.5rem 0.75rem; }
   .warning-box { background: rgba(255,68,102,0.1); border: 1px solid rgba(255,68,102,0.3); border-radius: 4px; color: #ff4466; font-size: 0.82rem; padding: 0.75rem; }
+  .admin-override-banner { background: rgba(255,68,102,0.08); border: 1px solid rgba(255,68,102,0.35); border-radius: 6px; color: #ff4466; font-size: 0.85rem; padding: 0.85rem 1rem; }
+  .admin-override-desc { color: #8fa3cc; font-size: 0.8rem; margin: 0.4rem 0 0; }
+  .interrupted-notice { display: flex; flex-direction: column; gap: 0.2rem; align-items: flex-end; }
+  .interrupted-label { font-family: 'Space Mono', monospace; font-size: 0.78rem; font-weight: 700; color: #ffaa00; letter-spacing: 0.04em; }
+  .interrupted-sub { font-size: 0.75rem; color: #8fa3cc; text-align: right; }
   .btn-warn { background: none; border: 1px solid #ffaa00; border-radius: 4px; color: #ffaa00; cursor: pointer; font-size: 0.82rem; font-weight: 600; padding: 0.5rem 0.9rem; }
   .btn-danger { background: none; border: 1px solid #ff4466; border-radius: 4px; color: #ff4466; cursor: pointer; font-size: 0.82rem; font-weight: 600; padding: 0.5rem 0.9rem; }
 </style>
